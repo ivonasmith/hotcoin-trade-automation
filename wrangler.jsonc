@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "uncleonchain-trade-bot",
+  "account_id": "7223815bf6bbf1aa5ac8bec985bf9490",
+  "main": "cloud/worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "DESK", "class_name": "TradeDesk" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TradeDesk"] }],
+  "vars": {
+    "EXPECTED_X_USERNAME": "Uncle_Onchain",
+    "RUN_MODE": "live",
+    "PUBLISH_ENABLED": "false",
+    "TRADE_LOG_URL": "https://bottlenose-muse-07e.notion.site/HotCoinDesk-Trade-Record-3cfb72fc8cae808d9deecfdc21f4cba5"
+  },
+  "observability": { "enabled": false }
+}

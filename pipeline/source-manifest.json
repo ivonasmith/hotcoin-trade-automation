@@ -1,0 +1,41 @@
+{
+  "每日取数.py": {
+    "source_sha256": "f1db11788ea70cd0e060cf49d7022cce56546fdc8a348b5096c7206a45d5fe14",
+    "vendor_sha256": "f1db11788ea70cd0e060cf49d7022cce56546fdc8a348b5096c7206a45d5fe14",
+    "changes": []
+  },
+  "拉数据.py": {
+    "source_sha256": "8b71475c325e6573691ba0c087b7224248703f3ad269c865af756aa9c0149b43",
+    "vendor_sha256": "b1455792effb68bba2c218e8ce8ace519273f8e6716fe8f50761102765a19928",
+    "changes": [
+      "移除本地固定代理；使用HOTCOIN_HTTP_PROXY配置；日志不显示代理地址"
+    ]
+  },
+  "指标与关键位.py": {
+    "source_sha256": "b8e060cbf740d1a3694fc7e6687678099d3ced9038c1b32bff23739aea4b0e38",
+    "vendor_sha256": "b8e060cbf740d1a3694fc7e6687678099d3ced9038c1b32bff23739aea4b0e38",
+    "changes": []
+  },
+  "成交额排行榜.py": {
+    "source_sha256": "f532e65338616cb952b5e7f3d0258f40f89a1d4408e9d358a573eb9133cb1178",
+    "vendor_sha256": "f532e65338616cb952b5e7f3d0258f40f89a1d4408e9d358a573eb9133cb1178",
+    "changes": []
+  },
+  "做空筛选.py": {
+    "source_sha256": "adf0313722edca87c2581f1569e153da5842cfae6d8e3cc9cb10a3553abce34e",
+    "vendor_sha256": "adf0313722edca87c2581f1569e153da5842cfae6d8e3cc9cb10a3553abce34e",
+    "changes": [
+      "路径A按近7日平均资金费率判定；负值或缺失均不放行"
+    ]
+  },
+  "压力位回测.py": {
+    "source_sha256": "6fdde24202615ccdb5c0b08988c32c02139d6d27d981f5eb465ae27846369381",
+    "vendor_sha256": "6fdde24202615ccdb5c0b08988c32c02139d6d27d981f5eb465ae27846369381",
+    "changes": []
+  },
+  "L1L4日更.py": {
+    "source_sha256": "97107039052ca6a49c0c36f0b979a47b0452ed956ddf92041b4ffecbffc55157",
+    "vendor_sha256": "97107039052ca6a49c0c36f0b979a47b0452ed956ddf92041b4ffecbffc55157",
+    "changes": []
+  }
+}
