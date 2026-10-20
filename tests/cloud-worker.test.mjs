@@ -94,7 +94,7 @@ test('Telegram热点完成后生成送审稿并由唯一审核人批准',async()
     if(String(url).includes('apinebula.ai')) {
       const body=JSON.parse(options.body);
       assert.equal(body.model,'claude-sonnet-5-5');
-      assert.equal(body.temperature,0.2);
+      assert.equal('temperature' in body,false);
       assert.equal(body.messages[0].content.includes('严禁提出新单'),true);
       return Response.json({choices:[{message:{content:'审核正文：今天不开新单。\n\n送审备注：缺交易数据。'}}],usage:{total_tokens:20}});
     }
@@ -278,6 +278,7 @@ test('请求超时如实显示为超时而不是HTTP 502，并自动重试一次
     assert.equal(message.includes('请求超时'),true);
     assert.equal(message.includes('HTTP 502'),false);
     assert.equal(message.includes('/draft'),true);
+    assert.equal(message.includes('已自动重试过一次'),true);
   } finally {restore();}
 });
 test('网关返回HTML错误页时显示真实状态码并重试，第二次成功则出稿',async()=>{
@@ -297,6 +298,7 @@ test('401这类配置错误不重试，直接提示令牌问题',async()=>{
     assert.equal(calls.nebula.length,1);
     assert.equal(entries.get('draft:'+day).http_status,401);
     assert.equal(calls.telegram.at(-1).text.includes('令牌'),true);
+    assert.equal(calls.telegram.at(-1).text.includes('已自动重试'),false);
   } finally {restore();}
 });
 test('模型漏写$时由程序补上，汉字数字在Telegram消息里被提示',async()=>{

@@ -57,6 +57,7 @@ async function withRetry(run,attempts=2,delayMs=1500) {
     try { return await run(); }
     catch(error) {
       const transient=!error.status || error.status===429 || error.status>=500;
+      error.attempts=attempt;
       if(!transient || attempt>=attempts) throw error;
       await sleep(delayMs);
     }
@@ -88,7 +89,7 @@ function apiNebulaFailure(error) {
   const label=status?`HTTP ${status}`:({timeout:'请求超时',network:'网络错误'}[error?.kind]||'无状态码');
   const detail=String(error?.providerMessage||'')
     .replace(/sk-[A-Za-z0-9_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
-  return {status,label,reason,detail};
+  return {status,label,reason,detail,attempts:Number(error?.attempts)||1};
 }
 async function telegram(env,method,payload) {
   if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
@@ -100,7 +101,7 @@ async function apiNebulaDraft(env,hotspots) {
   const model=env.APINEBULA_MODEL||'claude-sonnet-5-5';
   const request={
     method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
-    body:JSON.stringify({model,max_tokens:1800,temperature:0.2,
+    body:JSON.stringify({model,max_tokens:1800,
       messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`}]})};
   // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
   const result=await withRetry(async()=>{
@@ -390,7 +391,7 @@ export class TradeDesk {
       const failure=apiNebulaFailure(error);
       await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),
         model:env.APINEBULA_MODEL||'claude-sonnet-5-5',http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
-      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。已自动重试过一次；可发送 /draft 再试。`});
+      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}可发送 /draft 再试。`});
     }
     return json({ok:true});
   }
