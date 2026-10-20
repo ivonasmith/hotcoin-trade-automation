@@ -92,7 +92,7 @@ Telegram文字热点流程：`/hotspots` → 粘贴一段或多段文字 → `/d
 2. Worker 排“海报任务”。GitHub Actions 工作流 `jobs.yml` 每5分钟（北京时间18:00–22:59，工作日）问 Worker 有没有任务（用已有的 `PIPELINE_SECRET`，不需要新密钥），有任务才安装 Chromium，用仓库里的 `poster/poster_gen.py`（原样，不改）出4张PNG并自检（英文无中文、订单价位与正文一致），上传给 Worker，Worker 直接发到 Telegram（文档形式，保留原分辨率）。
 3. Telegram 收到：中文正式稿、英文正式稿、4张图、按钮“图片与正式稿通过 / 退回修改”。
 4. 终审通过 → 排“台账任务”：同一个工作流用 `NOTION_TOKEN` 写 Notion，只追加不改原记录（新单进“当前在场”，条件进“条件单登记簿”，成交/作废/过期/止损了结记入自动创建的“六、状态变更记录”，汇总数字和“更新至”同步，旧“更新至”文字保留在“上期记录”后面）；每条都有 `desk:` 标记，重复运行不会重复写。
-5. 中文北京时间20:00、英文21:00由 Durable Object 闹钟触发；迟到超过10分钟，或批准时已错过，一律不补发，回 Telegram 问“现在补发 / 这条不发了”。`PUBLISH_ENABLED` 不是 `true` 时到点只发“演练”消息，不调用 X。
+5. 中文北京时间20:00、英文21:00由 Durable Object 闹钟触发；目标时间后60分钟内仍自动执行，超过60分钟才停止自动补发并回 Telegram 问“现在补发 / 这条不发了”。`PUBLISH_ENABLED` 不是 `true` 时到点只发“演练”消息，不调用 X。
 6. 防重复：每个按钮、任务、闹钟槽位都是 compare-and-set；Telegram 重发同一个回调只处理一次；发推采用“先占位再动作”，请求结果不确定时标记 unknown，绝不自动重发。
 
 可选：在后台填“GitHub令牌”（Actions读写）可让海报任务立刻启动，不用等5分钟轮询。仓库 Secret 里放 `CLOUDFLARE_API_TOKEN` 后，`deploy.yml` 会在推送 main 且测试通过后自动部署 Worker；没有这个 Secret 时它只会跳过，部署仍用 `npx wrangler deploy`。

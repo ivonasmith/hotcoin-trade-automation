@@ -1,0 +1,16 @@
+{
+  "day": "2026-10-21",
+  "issue": 38,
+  "order": null,
+  "proposals": [],
+  "condition_backfills": [
+    {
+      "issue": 38,
+      "symbol": "SOL",
+      "condition": "成交前SOL价格先跌到目标96.6561",
+      "action": "本单作废（目标已先到，不再追空）",
+      "triggered": "否（未成交，价格未到目标）",
+      "conclusion": "每期复核"
+    }
+  ]
+}

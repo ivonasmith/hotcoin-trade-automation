@@ -70,6 +70,22 @@ class LedgerWriteTest(unittest.TestCase):
         self.assertEqual(mutations(self.fake), count)
         self.assertEqual((self.fake.kids, self.fake.blocks), snapshot)
 
+    def test_existing_order_condition_backfill_is_append_only_and_idempotent(self):
+        before_active = copy.deepcopy(self.table("二、"))
+        before_registry = copy.deepcopy(self.table("四、"))
+        payload = order_payload(order=None, conditions=[], condition_backfills=[{
+            "issue": 38, "symbol": "SOL", "condition": "成交前SOL价格先跌到目标96.6561",
+            "action": "本单作废（目标已先到，不再追空）", "triggered": "否（未成交，价格未到目标）", "conclusion": "每期复核"}])
+        self.assertEqual(run(self.fake, payload), ["条件单登记簿补写1条"])
+        self.assertEqual(self.table("二、"), before_active)
+        registry = self.table("四、")
+        self.assertEqual(registry[:len(before_registry)], before_registry)
+        self.assertEqual(registry[-1], ["38", "SOL", "成交前SOL价格先跌到目标96.6561",
+                                        "本单作废（目标已先到，不再追空）", "否（未成交，价格未到目标）", "每期复核"])
+        writes = mutations(self.fake)
+        self.assertEqual(run(self.fake, payload), [])
+        self.assertEqual(mutations(self.fake), writes)
+
     def test_crash_between_summary_and_row_does_not_double_count(self):
         self.fake.fail_on = lambda m, p, b: m == "PATCH" and p.endswith("/children") and \
             b["children"][0]["table_row"]["cells"][0][0]["text"]["content"] == "38" and len(b["children"][0]["table_row"]["cells"]) == 15

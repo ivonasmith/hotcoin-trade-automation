@@ -6,9 +6,9 @@
 import {beijingDay,eligible,dueAt} from '../calendar.mjs';
 import {splitDraft,formalChinese,formalEnglish,bodyProblems,TRANSLATE_SYSTEM,translatePrompt,englishProblems,
   issueNumber,posterNames,posterPayload,ledgerPayload} from './formal.mjs';
-import {accessToken,uploadImage,createPost} from './x.mjs';
+import {accessToken,checkPostLength,uploadImage,createPost,xErrorReason} from './x.mjs';
 
-export const GRACE_MS=10*60000;      // a slot may fire up to 10 minutes late; after that it waits for the reviewer
+export const GRACE_MS=60*60000;      // allow data/API/review delays; after 60 minutes it waits for the reviewer
 export const LEASE_MS=12*60000;
 export const MAX_ATTEMPTS=3;
 export const WATCHDOG_MS=25*60000;
@@ -381,6 +381,7 @@ export class Flow {
       const account=await this.s.get('x-account');
       if(!account || account.username?.toLowerCase()!==String(this.env.EXPECTED_X_USERNAME).toLowerCase()) throw Error('X账号与预期不符');
       const token=await accessToken({storage:this.s,env:this.env,request:this.d.provider,now:this.now()});
+      await checkPostLength({token,text,request:this.d.provider});
       const mediaIds=[];
       for(const key of keys) {
         const bytes=await this.d.tgDownload(this.env,flow.files[key].file_id);
@@ -395,8 +396,9 @@ export class Flow {
       const slot=(await this.getFlow(day)).slots[lang];
       // If the post call itself may have gone through, never retry blindly.
       const ambiguous=slot.media_ids && !slot.tweet_id;
-      await this.slotCas(day,lang,['publishing'],{status:ambiguous?'unknown':'failed',error:String(error.message||error).slice(0,300)});
-      await this.say(`第${flow.issue}期${LANG_NAME[lang]}版没有发布成功：${error.message}。${ambiguous?'发布请求可能已经送达X，请先到账号主页确认，程序不会自动重发。':'程序不会自动重试，请处理后告诉我。'}`);
+      const reason=xErrorReason(error);
+      await this.slotCas(day,lang,['publishing'],{status:ambiguous?'unknown':'failed',error:reason.slice(0,1000)});
+      await this.say(`第${flow.issue}期${LANG_NAME[lang]}版没有发布成功。X返回：${reason}。${ambiguous?'发布请求可能已经送达X，请先到账号主页确认，程序不会自动重发。':'程序不会自动重试，请处理后告诉我。'}`);
       return false;
     }
   }

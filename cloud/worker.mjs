@@ -47,6 +47,7 @@ async function provider(url,options,timeoutMs=25000) {
     error.status=response.status;
     error.providerType=data?.error?.type||'';
     error.providerMessage=String(data?.error?.message||data?.error_msg||data?.message||data?.msg||data?.detail||
+      (Array.isArray(data?.errors)?data.errors.map(item=>item?.detail||item?.message||item?.title).filter(Boolean).join('；'):'')||
       (typeof data?.error==='string'?data.error:'')||JSON.stringify(data)||'').slice(0,500);
     throw error;
   }

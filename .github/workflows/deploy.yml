@@ -31,3 +31,10 @@ jobs:
       - name: 部署
         if: steps.gate.outputs.go == 'true'
         run: npx --yes wrangler@4 deploy
+      - name: 幂等补登第38期SOL成交前目标作废条件
+        if: steps.gate.outputs.go == 'true'
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: |
+          test -n "$NOTION_TOKEN"
+          python3 pipeline/ledger_write.py pipeline/migrations/issue38-sol-target-condition.json "$NOTION_TOKEN"

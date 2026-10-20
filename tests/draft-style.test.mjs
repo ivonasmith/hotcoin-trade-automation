@@ -42,8 +42,8 @@ test('提示词包含正面标准：阿拉伯数字、$前缀、送审备注达�
     assert.equal(DRAFT_SYSTEM.includes(phrase),true,phrase);
 });
 test('自检：超长、新单缺盈亏比和有效期、盈亏比算错都会提示；写全且算对不报警',()=>{
-  const long='审核正文：'+'字'.repeat(600)+'\n\n送审备注：可发。';
-  assert.equal(lintDraft(long).some(w=>w.includes('超过500字')),true);
+  const long='审核正文：'+'字'.repeat(1100)+'\n\n送审备注：可发。';
+  assert.equal(lintDraft(long).some(w=>w.includes('超过1000字')),true);
   const missing=lintDraft('审核正文：进场限价82,314.42，止损83,960.71，目标75,729.27，小仓位。\n\n送审备注：可发。');
   assert.equal(missing.some(w=>w.includes('新单缺少')&&w.includes('盈亏比')&&w.includes('有效期')),true);
   const wrong=lintDraft('审核正文：进场限价82,314.42，止损83,960.71，目标75,729.27，盈亏比1:2，有效期到10月31日。\n\n送审备注：可发。');
@@ -52,15 +52,15 @@ test('自检：超长、新单缺盈亏比和有效期、盈亏比算错都会�
   assert.deepEqual(ok,[]);
 });
 test('提示词不再要求强制句，并禁止把费率当方向理由',()=>{
-  for(const phrase of ['硬上限500字','只作温度描述','程序已定的交易决定'])
+  for(const phrase of ['硬上限1000字','超过1000字才砍','只作温度描述','程序已定的交易决定'])
     assert.equal(DRAFT_SYSTEM.includes(phrase),true,phrase);
 });
-test('自检：编造的“据报道”数字、系统自述词、超过500字都会被点出来',()=>{
-  const body='审核正文：今天我挂一张$BTC空单。'+'字'.repeat(490)+'昨天ETF净流入约5.27亿美元（据报道）。$ETH也过了筛选，一天只写一张。\n\n送审备注：可发。';
+test('自检：编造的“据报道”数字、系统自述词、超过1000字都会被点出来',()=>{
+  const body='审核正文：今天我挂一张$BTC空单。'+'字'.repeat(990)+'昨天ETF净流入约5.27亿美元（据报道）。$ETH也过了筛选，一天只写一张。\n\n送审备注：可发。';
   const warnings=lintDraft(body,null,'热点：亚洲股市下跌，ETF净流入约3.1亿美元');
   assert.equal(warnings.some(w=>w.includes('5.27')&&w.includes('据报道')),true);
   assert.equal(warnings.some(w=>w.includes('内部用词')&&w.includes('筛选')),true);
-  assert.equal(warnings.some(w=>w.includes('超过500字')),true);
+  assert.equal(warnings.some(w=>w.includes('超过1000字')),true);
   const ok=lintDraft('审核正文：ETF净流入约3.1亿美元（据报道）。\n\n送审备注：可发。',null,'ETF净流入约3.1亿美元');
   assert.equal(ok.some(w=>w.includes('据报道')),false);
 });

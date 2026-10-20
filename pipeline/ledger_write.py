@@ -228,6 +228,12 @@ def condition_rows(payload):
             for c in payload.get("conditions", [])]
 
 
+def condition_backfill_rows(payload):
+    """One-off corrections for an existing order: append missing conditions, never edit prior rows."""
+    return [[str(c.get("issue", payload["issue"])), c["symbol"], c["condition"], c["action"],
+             c["triggered"], c["conclusion"]] for c in payload.get("condition_backfills", [])]
+
+
 def apply(payload, token=None, call=None, page_url=None):
     """Returns a list of human-readable actions taken (empty if everything was already written)."""
     call = call or notion_request(token)
@@ -240,6 +246,17 @@ def apply(payload, token=None, call=None, page_url=None):
     log_keys = {r["text"][8] for r in (log_info["rows"][1:] if log_info else []) if len(r["text"]) > 8}
     summary_text = (find_row(page.section("一、")["rows"], {0: "更新至"}) or {"text": ["", ""]})["text"][1]
     actions, deltas_total, descs = [], {}, []
+
+    registry = page.section("四、")
+    backfills = condition_backfill_rows(payload)
+    if backfills:
+        if not registry:
+            raise RuntimeError("台账里没找到“四、条件单登记簿”表格，不写入")
+        fresh = [r for r in backfills if not find_row(registry["rows"], {0: r[0], 1: r[1], 2: r[2]})]
+        if fresh:
+            append_rows(call, registry, fresh)
+            actions.append(f"条件单登记簿补写{len(fresh)}条")
+            registry = page.refresh("四、")
 
     entries = [e for e in status_entries(day, payload.get("proposals") or [], active["rows"]) if e["key"] not in log_keys]
     new_key, new_row = (order_row(payload) if payload.get("order") else (None, None))

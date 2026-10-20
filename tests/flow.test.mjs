@@ -35,6 +35,7 @@ function harness({now=Date.parse(DAY+'T10:00:00+08:00'),env={},translate,provide
     tgDownload:async(e,id)=>{log.downloads.push(id);return new Uint8Array(3000);},
     translate:translate||(async(e,text)=>{log.translate.push(text);return {content:EN,model:'m'};}),
     provider:provider||(async(url,options)=>{log.x.push({url,options});
+      if(url.includes('/users/me?')) return {data:{subscription_type:'premium'}};
       if(url.endsWith('/media/upload')) return {data:{id:'m'+log.x.length}};
       if(url.endsWith('/tweets')) return {data:{id:'tw1'}};
       throw Error('unexpected '+url);})};
@@ -319,8 +320,16 @@ test('到点演练：发全文预览但不调用X，闹钟重复触发也只演�
   assert.equal((await h.flow.getFlow(DAY)).slots.en.status,'dry_run');
   assert.equal(h.alarm(),null);
 });
-test('错过时间不擅自补发：晚点批准、闹钟迟到都先问你；补发/放弃只生效一次',async()=>{
-  const h=harness({now:dueAt(DAY,'zh')+30*60000});
+test('目标时间后60分钟内仍自动执行，超过60分钟才询问；补发/放弃只生效一次',async()=>{
+  const within=harness({now:dueAt(DAY,'zh')+30*60000});
+  await toAwaitingFinal(within);
+  await within.flow.finalApprove(DAY,1);
+  assert.equal((await within.flow.getFlow(DAY)).slots.zh.status,'scheduled');
+  assert.equal(within.log.telegram.some(m=>rows(m).includes(`late_post:${DAY}:zh`)),false);
+  await within.flow.alarm();
+  assert.equal((await within.flow.getFlow(DAY)).slots.zh.status,'dry_run');
+
+  const h=harness({now:dueAt(DAY,'zh')+GRACE_MS+60000});
   await toAwaitingFinal(h);
   await h.flow.finalApprove(DAY,1);
   let flow=await h.flow.getFlow(DAY);
@@ -330,7 +339,7 @@ test('错过时间不擅自补发：晚点批准、闹钟迟到都先问你；�
   assert.ok(ask);
   assert.deepEqual(rows(ask),[`late_post:${DAY}:zh`,`late_skip:${DAY}:zh`]);
   assert.equal(h.log.x.length,0);
-  // an alarm that fires 11 minutes late for en also waits
+  // an alarm that fires 61 minutes late for en also waits
   h.state.now=dueAt(DAY,'en')+GRACE_MS+60000;
   await h.flow.alarm();
   flow=await h.flow.getFlow(DAY);
@@ -368,8 +377,9 @@ test('开关打开后：先传两张图再发一条带图推文，只发一次',
   const h=await liveHarness();
   await Promise.all([h.flow.alarm(),h.flow.alarm()]);
   const urls=h.log.x.map(c=>c.url);
-  assert.deepEqual(urls,['https://api.x.com/2/media/upload','https://api.x.com/2/media/upload','https://api.x.com/2/tweets']);
-  const body=JSON.parse(h.log.x[2].options.body);
+  assert.deepEqual(urls,['https://api.x.com/2/users/me?user.fields=subscription,subscription_type,verified',
+    'https://api.x.com/2/media/upload','https://api.x.com/2/media/upload','https://api.x.com/2/tweets']);
+  const body=JSON.parse(h.log.x[3].options.body);
   assert.equal(body.text,BODY+'\n\n交易记录：https://notion.example/ledger');
   assert.equal(body.media.media_ids.length,2);
   assert.equal(h.log.downloads.length,2);
@@ -378,12 +388,14 @@ test('开关打开后：先传两张图再发一条带图推文，只发一次',
 });
 test('发推失败：图片已上传但发推未确认，标记未知，绝不自动重发',async()=>{
   const h=await liveHarness({provider:async(url,options)=>{
+    if(url.includes('/users/me?')) return {data:{subscription_type:'premium'}};
     if(url.endsWith('/media/upload')) return {data:{id:'m'}};
-    throw Error('服务请求超时');}});
+    const error=Error('服务请求失败（HTTP 403）');error.status=403;error.providerMessage='Your account is suspended';throw error;}});
   await h.flow.alarm();
   const slot=(await h.flow.getFlow(DAY)).slots.zh;
   assert.equal(slot.status,'unknown');
   assert.match(texts(h).at(-1),/可能已经送达X/);
+  assert.match(texts(h).at(-1),/HTTP 403：Your account is suspended/);
   const before=h.log.x.length;
   await h.flow.alarm();
   assert.equal(h.log.x.length,before,'再次触发不会重发');
@@ -399,12 +411,28 @@ test('X令牌过期时先续期并保存新令牌',async()=>{
   const calls=[];
   const h=await liveHarness({provider:async(url,options)=>{calls.push(url);
     if(url.endsWith('/oauth2/token')) return {access_token:'new',refresh_token:'ref2',expires_in:7200};
+    if(url.includes('/users/me?')) return {data:{subscription_type:'premium'}};
     if(url.endsWith('/media/upload')) return {data:{id:'m'}};
     return {data:{id:'tw9'}};}});
   await h.flow.s.put('x-tokens',await seal({access_token:'old',refresh_token:'ref',obtained_at:h.state.now-3*3600000,expires_in:7200},h.env.TOKEN_ENCRYPTION_KEY));
   await h.flow.alarm();
   assert.equal(calls[0],'https://api.x.com/2/oauth2/token');
   assert.equal((await h.flow.getFlow(DAY)).slots.zh.status,'posted');
+});
+test('普通账号正文超出280加权字符时在上传图片前停止，并带回明确原因',async()=>{
+  const h=await liveHarness({provider:async(url,options)=>{
+    h.log.x.push({url,options});
+    if(url.includes('/users/me?')) return {data:{}};
+    throw Error('正文过长时不应继续调用X');
+  }});
+  const flow=await h.flow.getFlow(DAY);
+  await h.flow.s.put('flow:'+DAY,{...flow,formal:{...flow.formal,zh_post:'中'.repeat(141)}});
+  await h.flow.alarm();
+  const slot=(await h.flow.getFlow(DAY)).slots.zh;
+  assert.equal(slot.status,'failed');
+  assert.equal(h.log.x.filter(c=>c.url.endsWith('/media/upload')).length,0);
+  assert.match(texts(h).at(-1),/282个加权字符/);
+  assert.match(texts(h).at(-1),/上限为280/);
 });
 test('图片文件名符合标准',()=>{
   assert.deepEqual(posterNames(37),{zh_desktop:'poster_zh_第37期.png',zh_mobile:'poster_zh_第37期-手机版.png',
