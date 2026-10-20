@@ -235,3 +235,66 @@ test('ApiNebula错误显示平台原因但遮盖密钥',async()=>{
     assert.equal(html.includes('sk-nebula-secret'),false);
   } finally {globalThis.fetch=old;}
 });
+function draftSetup(fetchImpl) {
+  const ctx=setup({TELEGRAM_WEBHOOK_SECRET:'hook-secret',TELEGRAM_BOT_TOKEN:'test-token',
+    TELEGRAM_OWNER_ID:'123',APINEBULA_API_KEY:'sk-nebula-secret',APINEBULA_MODEL:'claude-sonnet-5-5'});
+  const calls={telegram:[],nebula:[]};
+  const old=globalThis.fetch;
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).includes('apinebula.ai')) {calls.nebula.push(JSON.parse(options.body));return fetchImpl(calls.nebula.length);}
+    calls.telegram.push(JSON.parse(options.body));
+    return Response.json({ok:true});
+  };
+  const day=beijingDay();
+  ctx.entries.set('hotspots:'+day,{day,parts:['测试热点'],submitted:Date.now()});
+  return {...ctx,calls,day,restore:()=>{globalThis.fetch=old;}};
+}
+test('大快照先压缩再给模型，且提示词标注已压缩',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>Response.json({choices:[{message:{content:'审核正文：ok\n\n送审备注：ok'}}]}));
+  const metrics={};
+  for(const name of ['BTC','ETH','SOL','XRP','BNB']) metrics[name]={levels:Array.from({length:4000},(_,i)=>({p:i+0.123456789,note:'段'+i}))};
+  entries.set('snapshot:'+day,{report:{ok:true,finished_at:new Date().toISOString()},summary:{'指标':metrics},four_lines:'L1：偏多',received_at:Date.now()});
+  try {
+    const response=await desk.makeDraft(123,desk.env);
+    assert.equal(response.status,200);
+    const prompt=calls.nebula[0].messages[1].content;
+    assert.equal(prompt.length<70000,true);
+    assert.equal(prompt.includes('体积已压缩'),true);
+    assert.equal(prompt.includes('L1：偏多'),true);
+    assert.equal(entries.get('draft:'+day).status,'pending_text_review');
+  } finally {restore();}
+});
+test('请求超时如实显示为超时而不是HTTP 502，并自动重试一次',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Object.assign(new Error('timed out'),{name:'TimeoutError'});});
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,2);
+    const record=entries.get('draft:'+day);
+    assert.equal(record.status,'generation_failed');
+    assert.equal(record.http_status,null);
+    assert.equal(record.failure,'请求超时');
+    const message=calls.telegram.at(-1).text;
+    assert.equal(message.includes('请求超时'),true);
+    assert.equal(message.includes('HTTP 502'),false);
+    assert.equal(message.includes('/draft'),true);
+  } finally {restore();}
+});
+test('网关返回HTML错误页时显示真实状态码并重试，第二次成功则出稿',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(n=>n===1
+    ?new Response('<html><body><h1>502 Bad Gateway</h1></body></html>',{status:502})
+    :Response.json({choices:[{message:{content:'审核正文：ok\n\n送审备注：ok'}}]}));
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,2);
+    assert.equal(entries.get('draft:'+day).status,'pending_text_review');
+  } finally {restore();}
+});
+test('401这类配置错误不重试，直接提示令牌问题',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>Response.json({error:{message:'bad key'}},{status:401}));
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,1);
+    assert.equal(entries.get('draft:'+day).http_status,401);
+    assert.equal(calls.telegram.at(-1).text.includes('令牌'),true);
+  } finally {restore();}
+});

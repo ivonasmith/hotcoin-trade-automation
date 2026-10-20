@@ -1,4 +1,5 @@
 import {beijingDay,eligible} from '../calendar.mjs';
+import {compactSnapshot} from './snapshot.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
 
 const SCOPES='tweet.read tweet.write users.read media.write offline.access';
@@ -16,10 +17,28 @@ function csrfCookie(request) {
   return (request.headers.get('Cookie')||'').split(';').map(s=>s.trim())
     .find(s=>s.startsWith('desk_oauth='))?.slice(11);
 }
-async function provider(url,options) {
-  const response=await fetch(url,{...options,signal:AbortSignal.timeout(25000)});
-  let data;
-  try {data=await response.json();} catch {throw Error('服务响应无法解析');}
+// Errors carry `kind` (timeout | network | non_json) and, when the server answered, the real `status`,
+// so callers can tell a slow relay from a gateway error page instead of guessing "502".
+async function provider(url,options,timeoutMs=25000) {
+  let response,text;
+  try {
+    response=await fetch(url,{...options,signal:AbortSignal.timeout(timeoutMs)});
+    text=await response.text();
+  } catch(cause) {
+    const timedOut=cause?.name==='TimeoutError' || cause?.name==='AbortError';
+    const error=Error(timedOut?'服务请求超时':'服务网络连接失败');
+    error.kind=timedOut?'timeout':'network';
+    throw error;
+  }
+  let data=null;
+  try {data=JSON.parse(text);} catch {data=null;}
+  if(data===null || typeof data!=='object') {
+    const error=Error('服务响应无法解析');
+    error.kind='non_json';
+    error.status=response.status;
+    error.providerMessage=text.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim().slice(0,200);
+    throw error;
+  }
   if(!response.ok || data.ok===false) {
     const error=Error(`服务请求失败（HTTP ${response.status}）`);
     error.status=response.status;
@@ -29,6 +48,18 @@ async function provider(url,options) {
     throw error;
   }
   return data;
+}
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+// Retry once for conditions that usually clear on their own: timeouts, network drops, 429/5xx, gateway pages.
+async function withRetry(run,attempts=2,delayMs=1500) {
+  for(let attempt=1;;attempt++) {
+    try { return await run(); }
+    catch(error) {
+      const transient=!error.status || error.status===429 || error.status>=500;
+      if(!transient || attempt>=attempts) throw error;
+      await sleep(delayMs);
+    }
+  }
 }
 function anthropicFailure(error) {
   const status=Number(error?.status)||502;
@@ -43,13 +74,20 @@ function anthropicFailure(error) {
   return {status,reason};
 }
 function apiNebulaFailure(error) {
-  const status=Number(error?.status)||502;
-  const reason={400:'ApiNebula不接受当前模型名或请求格式。',401:'ApiNebula令牌无效或不完整。',
+  // `status` is the real HTTP status when the server answered, otherwise null (never a made-up 502).
+  const status=Number(error?.status)||null;
+  const byKind={timeout:'ApiNebula响应超时，没有在等待时间内返回。',
+    network:'连不上ApiNebula（网络连接失败）。',
+    non_json:'ApiNebula返回的不是正常数据，像是网关错误页。'}[error?.kind];
+  const byStatus={400:'ApiNebula不接受当前模型名或请求格式。',401:'ApiNebula令牌无效或不完整。',
     402:'ApiNebula账户余额不足。',403:'令牌分组或模型列表不允许调用该模型。',
-    404:'ApiNebula没有找到该模型或Claude兼容接口。',429:'ApiNebula额度或频率已达到限制。'}[status]||'ApiNebula暂时无法完成检查。';
+    404:'ApiNebula没有找到该模型或Claude兼容接口。',429:'ApiNebula额度或频率已达到限制。'}[status];
+  const fallback=status?'ApiNebula暂时无法完成检查。':(error?.message||'ApiNebula暂时无法完成检查。');
+  const reason=byKind||byStatus||fallback;
+  const label=status?`HTTP ${status}`:({timeout:'请求超时',network:'网络错误'}[error?.kind]||'无状态码');
   const detail=String(error?.providerMessage||'')
     .replace(/sk-[A-Za-z0-9_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
-  return {status,reason,detail};
+  return {status,label,reason,detail};
 }
 async function telegram(env,method,payload) {
   if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
@@ -63,12 +101,18 @@ const DRAFT_SYSTEM=`你是“链上大叔｜热币分析”的送审稿编辑。
 async function apiNebulaDraft(env,hotspots) {
   if(!env.APINEBULA_API_KEY) throw Error('未配置ApiNebula');
   const model=env.APINEBULA_MODEL||'claude-sonnet-5-5';
-  const result=await provider('https://apinebula.ai/v1/chat/completions',{
+  const request={
     method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
     body:JSON.stringify({model,max_tokens:1800,
-      messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`}]})});
-  const content=result.choices?.[0]?.message?.content;
-  if(typeof content!=='string' || !content.trim()) throw Error('模型未返回草稿');
+      messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`}]})};
+  // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
+  const result=await withRetry(async()=>{
+    const answer=await provider('https://apinebula.ai/v1/chat/completions',request,45000);
+    const text=answer.choices?.[0]?.message?.content;
+    if(typeof text!=='string' || !text.trim()) throw Error('模型未返回草稿');
+    return answer;
+  });
+  const content=result.choices[0].message.content;
   return {content:content.trim(),model,usage:result.usage||null};
 }
 export default {
@@ -157,7 +201,7 @@ export class TradeDesk {
       if(path==='/admin/draft/status' && request.method==='GET') {
         const draft=await this.ctx.storage.get('draft:'+beijingDay());
         return json(draft?{ok:true,status:draft.status,model:draft.model||null,
-          http_status:draft.http_status||null,detail:draft.detail||null}:{ok:true,status:'missing'});
+          http_status:draft.http_status||null,failure:draft.failure||null,prompt_chars:draft.prompt_chars||null,detail:draft.detail||null}:{ok:true,status:'missing'});
       }
       if(path==='/admin/gemini/check' && request.method==='POST') {
         if(!env.GEMINI_API_KEY) return page('请先保存Gemini密钥','<a href="/admin">返回后台</a>',409);
@@ -194,7 +238,7 @@ export class TradeDesk {
           if(!result.id && !result.choices) throw Error('响应格式不兼容');
         } catch(error) {
           const failure=apiNebulaFailure(error);
-          return page('ApiNebula连接检查未通过',`<p>${escapeHTML(failure.reason)}</p><p>状态码：<code>HTTP ${failure.status}</code></p><p>模型：<code>${escapeHTML(model)}</code></p>${failure.detail?`<p>平台返回：<code>${escapeHTML(failure.detail)}</code></p>`:''}<p><a href="/admin">返回后台</a></p>`,409);
+          return page('ApiNebula连接检查未通过',`<p>${escapeHTML(failure.reason)}</p><p>状态：<code>${escapeHTML(failure.label)}</code></p><p>模型：<code>${escapeHTML(model)}</code></p>${failure.detail?`<p>平台返回：<code>${escapeHTML(failure.detail)}</code></p>`:''}<p><a href="/admin">返回后台</a></p>`,409);
         }
         return page('ApiNebula连接检查通过',`<p>已确认令牌、OpenAI兼容文本接口和Claude模型可以调用。</p><p>模型：<code>${escapeHTML(model)}</code></p><p>本次最多生成8个token。</p><p><a href="/admin">返回后台</a></p>`);
       }
@@ -325,10 +369,12 @@ export class TradeDesk {
       return json({ok:true});
     }
     await this.ctx.storage.put('draft:'+day,{status:'generating',started:Date.now()});
+    let promptChars=0;
     try {
       const snapshot=await this.ctx.storage.get('snapshot:'+day);
-      const verified=snapshot?`\n\n已通过程序新鲜度校验的当日交易快照：\n${JSON.stringify({
-        report:snapshot.report,summary:snapshot.summary,four_lines:snapshot.four_lines||''})}`:
+      const compact=snapshot?compactSnapshot(snapshot):null;
+      promptChars=compact?.chars||0;
+      const verified=compact?`\n\n已通过程序新鲜度校验的当日交易快照${compact.trimmed?`（体积已压缩：长列表只保留前${compact.items}项，被省略的内容不得推测）`:''}：\n${compact.body}`:
         '\n\n当日交易快照：尚未上传。禁止生成交易动作。';
       const generated=await apiNebulaDraft(env,saved.parts.join('\n\n')+verified);
       const draft={...generated,status:'pending_text_review',created:Date.now(),day};
@@ -341,8 +387,8 @@ export class TradeDesk {
     } catch(error) {
       const failure=apiNebulaFailure(error);
       await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),
-        model:env.APINEBULA_MODEL||'claude-sonnet-5-5',http_status:failure.status,detail:failure.detail||failure.reason});
-      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.detail||failure.reason}（HTTP ${failure.status}）`});
+        model:env.APINEBULA_MODEL||'claude-sonnet-5-5',http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
+      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。已自动重试过一次；可发送 /draft 再试。`});
     }
     return json({ok:true});
   }
