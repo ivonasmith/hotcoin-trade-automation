@@ -94,6 +94,7 @@ test('Telegram热点完成后生成送审稿并由唯一审核人批准',async()
     if(String(url).includes('apinebula.ai')) {
       const body=JSON.parse(options.body);
       assert.equal(body.model,'claude-sonnet-5-5');
+      assert.equal(body.temperature,0.2);
       assert.equal(body.messages[0].content.includes('严禁提出新单'),true);
       return Response.json({choices:[{message:{content:'审核正文：今天不开新单。\n\n送审备注：缺交易数据。'}}],usage:{total_tokens:20}});
     }

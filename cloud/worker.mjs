@@ -100,7 +100,7 @@ async function apiNebulaDraft(env,hotspots) {
   const model=env.APINEBULA_MODEL||'claude-sonnet-5-5';
   const request={
     method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
-    body:JSON.stringify({model,max_tokens:1800,
+    body:JSON.stringify({model,max_tokens:1800,temperature:0.2,
       messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`}]})};
   // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
   const result=await withRetry(async()=>{
