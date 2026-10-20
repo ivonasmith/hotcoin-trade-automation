@@ -34,10 +34,24 @@ test('自检能抓到汉字数字、内部用词和模板格式，达标稿不�
   assert.equal(bad.some(w=>w.includes('汉字数字')&&w.includes('二十')),true);
   assert.equal(bad.some(w=>w.includes('内部用词')&&w.includes('快照')),true);
   assert.equal(bad.some(w=>w.includes('小标题')),true);
-  const good=lintDraft('审核正文：今天我挂一张$BTC空单。进场限价82,314，止损83,960，目标75,730。万一反弹，我两天内撤单；一张单而已。\n\n送审备注：二十分钟内可核对，八万这类字眼只在备注里不检查。');
+  const good=lintDraft('审核正文：今天我挂一张$BTC空单。进场限价82,314，止损83,960，目标75,730，盈亏比1:4，有效期到10月31日。万一反弹，我两天内撤单；一张单而已。\n\n送审备注：二十分钟内可核对，八万这类字眼只在备注里不检查。');
   assert.deepEqual(good,[]);
 });
 test('提示词包含正面标准：阿拉伯数字、$前缀、强制句、送审备注达标标准，并保留交易闸门',()=>{
   for(const phrase of ['严禁提出新单','82,314','$BTC','不写汉字数字','多数人在高波动币上亏钱不是看错方向','20秒','达标样例','旧单不复活','迷因币裁决未完成'])
+    assert.equal(DRAFT_SYSTEM.includes(phrase),true,phrase);
+});
+test('自检：超长、新单缺盈亏比和有效期、盈亏比算错都会提示；写全且算对不报警',()=>{
+  const long='审核正文：'+'字'.repeat(600)+'\n\n送审备注：可发。';
+  assert.equal(lintDraft(long).some(w=>w.includes('超过500字')),true);
+  const missing=lintDraft('审核正文：进场限价82,314.42，止损83,960.71，目标75,729.27，小仓位。\n\n送审备注：可发。');
+  assert.equal(missing.some(w=>w.includes('新单缺少')&&w.includes('盈亏比')&&w.includes('有效期')),true);
+  const wrong=lintDraft('审核正文：进场限价82,314.42，止损83,960.71，目标75,729.27，盈亏比1:2，有效期到10月31日。\n\n送审备注：可发。');
+  assert.equal(wrong.some(w=>w.includes('按三个价位算是1:4.0')),true);
+  const ok=lintDraft('审核正文：进场限价82,314.42，距现价+0.99%；止损83,960.71；目标75,729.27，盈亏比1:4，小仓位，有效期到10月31日。\n\n送审备注：可发。');
+  assert.deepEqual(ok,[]);
+});
+test('提示词固定了强制句后的关系句，并禁止把费率当方向理由',()=>{
+  for(const phrase of ['我这张单先定好最多亏多少，再倒推仓位。','硬上限500字','只作温度描述','回代验算'])
     assert.equal(DRAFT_SYSTEM.includes(phrase),true,phrase);
 });
