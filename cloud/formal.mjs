@@ -12,11 +12,13 @@ export function splitDraft(content) {
 }
 
 // The formal Chinese post is the approved body, word for word, plus the trade-log link. No model touches it.
-export function formalChinese(body,tradeLogUrl) {
-  return `${body.trim()}\n\n交易记录：${tradeLogUrl}`;
+// The opening line announces issue number and date; the program adds it because the program owns the issue number.
+export const postHeader=(lang,issue,day)=>lang==='zh'?`【热币分析·第${issue}期（${day}）】`:`【Hot Coin Desk · Issue ${issue} (${day})】`;
+export function formalChinese(body,tradeLogUrl,header='') {
+  return `${header?header+'\n':''}${body.trim()}\n\n交易记录：${tradeLogUrl}`;
 }
-export function formalEnglish(text,tradeLogUrl) {
-  return `${text.trim()}\n\nTrade log: ${tradeLogUrl}`;
+export function formalEnglish(text,tradeLogUrl,header='') {
+  return `${header?header+'\n':''}${text.trim()}\n\nTrade log: ${tradeLogUrl}`;
 }
 
 // A reviewer approved this body; before it becomes the only source, confirm it still matches the program's order.
@@ -86,15 +88,17 @@ export function englishProblems(zh,en) {
   return problems;
 }
 
-// One issue per publishing day. The ledger says which issue it is updated to; count the publishing days since.
-export function issueNumber(ledger,day) {
+// Issue numbers count issues that were actually released, never calendar days.
+// `used` maps day -> issue for issues the reviewer already gave final approval (the program records it then).
+//  - a day that already has an approved issue keeps it (re-runs never renumber);
+//  - the ledger already updated to today means the ledger's number is today's;
+//  - otherwise the next number follows the highest issue known so far (ledger or approved earlier). Skipped days leave no gap.
+export function issueNumber(ledger,day,used={}) {
   if(!ledger || ledger.ok!==true || !Number.isInteger(ledger.updated_issue) || !ledger.updated_to) return null;
+  if(Number.isInteger(used[day])) return used[day];
   if(ledger.updated_to>=day) return ledger.updated_issue;
-  let issue=ledger.updated_issue;
-  for(let t=Date.parse(ledger.updated_to+'T00:00:00Z')+86400000;t<=Date.parse(day+'T00:00:00Z');t+=86400000) {
-    if(eligible(new Date(t).toISOString().slice(0,10)).ok) issue++;
-  }
-  return issue;
+  const earlier=Object.entries(used).filter(([d,n])=>d<day && Number.isInteger(n)).map(([,n])=>n);
+  return Math.max(ledger.updated_issue,...earlier)+1;
 }
 
 export function posterNames(issue) {

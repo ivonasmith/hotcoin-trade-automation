@@ -5,7 +5,7 @@
 // a double tap, a retried webhook or a re-delivered alarm can never repeat a step.
 import {beijingDay,eligible,dueAt} from '../calendar.mjs';
 import {splitDraft,formalChinese,formalEnglish,bodyProblems,TRANSLATE_SYSTEM,translatePrompt,englishProblems,
-  issueNumber,posterNames,posterPayload,ledgerPayload} from './formal.mjs';
+  issueNumber,posterNames,posterPayload,ledgerPayload,postHeader} from './formal.mjs';
 import {accessToken,checkPostLength,uploadImage,createPost,xErrorReason} from './x.mjs';
 
 export const GRACE_MS=60*60000;      // allow data/API/review delays; after 60 minutes it waits for the reviewer
@@ -69,7 +69,7 @@ export class Flow {
     const problems=bodyProblems(body,draft);
     if(problems.length) throw Error('已通过的正文与程序订单不一致：'+problems.join('；'));
     const snapshot=await this.s.get('snapshot:'+day);
-    const issue=issueNumber(snapshot?.ledger,day);
+    const issue=issueNumber(snapshot?.ledger,day,(await this.s.get('issues'))||{});
     if(!issue) throw Error('台账没有读取成功，无法确定今天是第几期');
     const url=this.env.TRADE_LOG_URL;
     if(!url) throw Error('没有配置 Notion 交易记录链接');
@@ -82,7 +82,7 @@ export class Flow {
       feedback=issues.join('；');
     }
     if(feedback) throw Error('英文稿和中文稿的数字没能核对一致：'+feedback);
-    const formal={zh:body,en:english,zh_post:formalChinese(body,url),en_post:formalEnglish(english,url),model};
+    const formal={zh:body,en:english,zh_post:formalChinese(body,url,postHeader('zh',issue,day)),en_post:formalEnglish(english,url,postHeader('en',issue,day)),model};
     // The poster job needs the same body text and the same program order.
     const payload=posterPayload({day,issue,draft,snapshot,body,english});
     const names=posterNames(issue);
@@ -248,6 +248,8 @@ export class Flow {
   async finalApprove(day,rev) {
     const approved=await this.cas(this.flowKey(day),['awaiting_final'],current=>current.rev===Number(rev)?{status:'final_approved',approved:this.now()}:{});
     if(!approved || approved.status!=='final_approved') return false;
+    // From now on this day owns its issue number, so tomorrow's number follows it even if the ledger has no new order.
+    await this.s.transaction(async tx=>{ await tx.put('issues',{...((await tx.get('issues'))||{}),[day]:approved.issue}); });
     const snapshot=await this.s.get('snapshot:'+day),draft=await this.s.get('draft:'+day);
     const lines=['图片与正式稿已通过。'];
     // Notion ledger: written by the program (the Notion token lives in GitHub Actions), append-only.
@@ -401,6 +403,28 @@ export class Flow {
       await this.say(`第${flow.issue}期${LANG_NAME[lang]}版没有发布成功。X返回：${reason}。${ambiguous?'发布请求可能已经送达X，请先到账号主页确认，程序不会自动重发。':'程序不会自动重试，请处理后告诉我。'}`);
       return false;
     }
+  }
+  // Start the post-approval flow over for a day that has not published anything (e.g. a wrong issue number was found).
+  async reissue(day) {
+    const flow=await this.getFlow(day);
+    if(!flow) { await this.say('今天还没有走到正式稿这一步，不需要重来。'); return false; }
+    const slots=Object.values(flow.slots||{});
+    if(slots.some(slot=>!['scheduled','missed','skipped','dry_run'].includes(slot.status))) {
+      await this.say('今天已经有一条开始发布或发布过了，不能重来。'); return false;
+    }
+    const reset=await this.s.transaction(async tx=>{
+      const current=await tx.get(this.flowKey(day));
+      if(!current) return false;
+      await tx.put(this.flowKey(day),{...current,status:'final_rejected',slots:{},rejected:this.now(),failure:null});
+      await tx.put('slots-open',((await tx.get('slots-open'))||[]).filter(d=>d!==day));
+      const {[day]:released,...issues}=(await tx.get('issues'))||{};
+      await tx.put('issues',issues);
+      return true;
+    });
+    if(!reset) return false;
+    await this.arm();
+    await this.startFormal(day);
+    return true;
   }
   // The reviewer asked for the post now instead of waiting for the scheduled time. Same at-most-once claim as the alarm.
   async postNow(day) {

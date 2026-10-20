@@ -84,10 +84,13 @@ test('英文稿自检：中文字符、缺数字、多数字、缺币种标记',
   assert.ok(englishProblems(BODY,EN.replace('$ETH','ETH')).some(p=>p.includes('币种')));
 });
 test('期号：按台账更新日之后的发布日累加，已更新到今天则不加',()=>{
+  // 期号只数真正发出去的，不数日历：台账最后一期是周五第35期，周一、周二没发，今天就是第36期
+  assert.equal(issueNumber(LEDGER,'2026-10-21'),36);
   assert.equal(issueNumber(LEDGER,'2026-10-19'),36);
-  assert.equal(issueNumber(LEDGER,'2026-10-20'),37);
-  assert.equal(issueNumber(LEDGER,'2026-10-18'),35+0,'周日不是发布日，仍在周五之后只有周一才加');
-  assert.equal(issueNumber({...LEDGER,updated_to:'2026-10-21'},'2026-10-21'),35);
+  assert.equal(issueNumber({...LEDGER,updated_to:'2026-10-21'},'2026-10-21'),35,'台账已更新到今天，就是台账的号');
+  assert.equal(issueNumber(LEDGER,'2026-10-21',{'2026-10-21':36}),36,'今天已终审通过的号不再变');
+  assert.equal(issueNumber(LEDGER,'2026-10-22',{'2026-10-21':36}),37,'昨天没新单、台账没更新，今天也接着昨天的号往后数');
+  assert.equal(issueNumber(LEDGER,'2026-10-26',{'2026-10-21':36,'2026-10-22':37}),38,'中间停发的日子不占号');
   assert.equal(issueNumber({ok:false},DAY),null);
 });
 test('splitDraft与正文校验',()=>{
@@ -122,9 +125,9 @@ test('文字稿通过后：正式稿数字一致，海报任务入队，重复�
   assert.equal(h.log.translate.length,1,'只翻译一次');
   const flow=await h.flow.getFlow(DAY);
   assert.equal(flow.status,'poster_pending');
-  assert.equal(flow.issue,38,'10-16之后的发布日：10-19、10-20、10-21');
-  assert.equal(flow.formal.zh_post,BODY+'\n\n交易记录：https://notion.example/ledger');
-  assert.equal(flow.formal.en_post,EN+'\n\nTrade log: https://notion.example/ledger');
+  assert.equal(flow.issue,36,'接着10-16的第35期；10-19、10-20没发布，不占期号');
+  assert.equal(flow.formal.zh_post,`【热币分析·第36期（${DAY}）】\n`+BODY+'\n\n交易记录：https://notion.example/ledger');
+  assert.equal(flow.formal.en_post,`【Hot Coin Desk · Issue 36 (${DAY})】\n`+EN+'\n\nTrade log: https://notion.example/ledger');
   const peek=await h.flow.nextJob(true);
   assert.equal(peek.id,'poster:'+DAY+':1');
   assert.equal(await h.flow.enqueue({id:peek.id,type:'poster',day:DAY,payload:{}}),false);
@@ -380,7 +383,7 @@ test('开关打开后：先传两张图再发一条带图推文，只发一次',
   assert.deepEqual(urls,['https://api.x.com/2/users/me?user.fields=subscription,subscription_type,verified',
     'https://api.x.com/2/media/upload','https://api.x.com/2/media/upload','https://api.x.com/2/tweets']);
   const body=JSON.parse(h.log.x[3].options.body);
-  assert.equal(body.text,BODY+'\n\n交易记录：https://notion.example/ledger');
+  assert.equal(body.text,`【热币分析·第36期（${DAY}）】\n`+BODY+'\n\n交易记录：https://notion.example/ledger');
   assert.equal(body.media.media_ids.length,2);
   assert.equal(h.log.downloads.length,2);
   assert.equal((await h.flow.getFlow(DAY)).slots.zh.tweet_id,'tw1');
@@ -455,4 +458,45 @@ test('/postnow：终审没通过时不发',async()=>{
   await toAwaitingFinal(h);
   assert.equal(await h.flow.postNow(DAY),false);
   assert.equal(h.log.x.length,0);
+});
+
+test('/reissue：未发布的当天重新走正式稿和出图，期号按新规则；已开始发布的不能重来',async()=>{
+  const h=harness();
+  await toAwaitingFinal(h);
+  await h.flow.finalApprove(DAY,1);
+  assert.equal((await h.flow.getFlow(DAY)).status,'final_approved');
+  assert.equal(await h.flow.reissue(DAY),true);
+  const again=await h.flow.getFlow(DAY);
+  assert.equal(again.status,'poster_pending');
+  assert.equal(again.rev,2);
+  assert.deepEqual(again.slots,{});
+  assert.equal((await h.flow.s.get('slots-open')).includes(DAY),false);
+  await h.flow.s.put('flow:'+DAY,{...again,status:'final_approved',slots:{zh:{due:1,status:'posted'},en:{due:2,status:'scheduled'}}});
+  assert.equal(await h.flow.reissue(DAY),false);
+});
+
+test('开头播报期号和日期：中文【热币分析·第N期（日期）】，英文【Hot Coin Desk · Issue N (日期)】，数字核对不受影响',async()=>{
+  const h=harness();
+  await toAwaitingFinal(h);
+  const flow=await h.flow.getFlow(DAY);
+  assert.ok(flow.formal.zh_post.startsWith(`【热币分析·第${flow.issue}期（${DAY}）】\n`));
+  assert.ok(flow.formal.en_post.startsWith(`【Hot Coin Desk · Issue ${flow.issue} (${DAY})】\n`));
+  assert.equal(flow.formal.zh,BODY);
+});
+
+test('终审通过后记下今天的期号；明天没新单也接着数；/reissue 释放今天的期号',async()=>{
+  const h=harness();
+  await toAwaitingFinal(h);
+  await h.flow.finalApprove(DAY,1);
+  assert.deepEqual(await h.flow.s.get('issues'),{[DAY]:36});
+  assert.equal(await h.flow.reissue(DAY),true);
+  assert.deepEqual(await h.flow.s.get('issues'),{});
+  const again=await h.flow.getFlow(DAY);
+  assert.equal(again.status,'poster_pending');
+  assert.equal(again.rev,2);
+  assert.equal(again.issue,36);
+  assert.deepEqual(again.slots,{});
+  assert.equal((await h.flow.s.get('slots-open')||[]).includes(DAY),false);
+  await h.flow.s.put('flow:'+DAY,{...again,status:'final_approved',slots:{zh:{due:1,status:'posted'},en:{due:2,status:'scheduled'}}});
+  assert.equal(await h.flow.reissue(DAY),false,'已经开始发布的不能重来');
 });

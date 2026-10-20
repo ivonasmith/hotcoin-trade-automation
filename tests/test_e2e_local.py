@@ -94,12 +94,12 @@ class EndToEnd(unittest.TestCase):
         st = self.state()
         self.assertEqual(len(st["log"]["model"]), 1, "只翻译一次")
         flow = st["entries"]["flow:" + DAY]
-        self.assertEqual((flow["status"], flow["issue"]), ("poster_pending", 38))
+        self.assertEqual((flow["status"], flow["issue"]), ("poster_pending", 36))
         # 2. the poll workflow: peek, then render the real posters and upload them
         self.assertEqual(self.run_runner(), 0)
         st = self.state()
         names = sorted(d["name"] for d in st["log"]["docs"])
-        self.assertEqual(names, sorted(["poster_zh_第38期.png", "poster_zh_第38期-手机版.png", "poster_en_第38期.png", "poster_en_第38期-手机版.png"]))
+        self.assertEqual(names, sorted(["poster_zh_第36期.png", "poster_zh_第36期-手机版.png", "poster_en_第36期.png", "poster_en_第36期-手机版.png"]))
         self.assertTrue(all(d["size"] > 50000 for d in st["log"]["docs"]))
         messages = [m for m in st["log"]["telegram"] if m["method"] == "sendMessage"]
         self.assertTrue(any("中文正式稿" in m["text"] and "交易记录：https://notion.example/ledger" in m["text"] for m in messages))
@@ -114,7 +114,7 @@ class EndToEnd(unittest.TestCase):
         notion = FakeNotion()
         self.run_runner(notion)
         texts = notion.texts(notion.table_by_title("二、"))
-        self.assertEqual(texts[-1][:3], ["38", DAY, "ETH"])
+        self.assertEqual(texts[-1][:3], ["36", DAY, "ETH"])
         self.assertEqual(len(notion.texts(notion.table_by_title("四、"))), 6)
         self.assertEqual(notion.texts(notion.table_by_title("六、"))[1][3], "过期作废")
         self.run_runner(notion)  # nothing left to do; the ledger is not written twice
