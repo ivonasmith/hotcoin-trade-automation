@@ -512,6 +512,10 @@ export class TradeDesk {
       await reply(draft?`今日送审稿状态：${draft.status}；模型：${draft.model}${flow?`\n正式流程：${flow.status}${flow.issue?`（第${flow.issue}期）`:''}${flow.failure?'；原因：'+flow.failure:''}${slots?'\n发布安排：'+slots:''}${flow.ledger_status?'\n台账：'+flow.ledger_status:''}`:''}`:'今天还没有送审稿。');
       return json({ok:true});
     }
+    if(text==='/postnow') {
+      await this.flow(env).postNow(beijingDay());
+      return json({ok:true});
+    }
     if(text==='/draft') return this.makeDraft(chat,env);
     let response;
     await this.ctx.storage.transaction(async tx=>{

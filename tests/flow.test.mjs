@@ -438,3 +438,21 @@ test('图片文件名符合标准',()=>{
   assert.deepEqual(posterNames(37),{zh_desktop:'poster_zh_第37期.png',zh_mobile:'poster_zh_第37期-手机版.png',
     en_desktop:'poster_en_第37期.png',en_mobile:'poster_en_第37期-手机版.png'});
 });
+
+test('/postnow：没到点也立即发中英文各一条，重复触发不重复发',async()=>{
+  const h=await liveHarness();
+  h.state.now=dueAt(DAY,'zh')-10*3600000;
+  await h.flow.postNow(DAY);
+  await h.flow.postNow(DAY);
+  const tweets=h.log.x.filter(c=>c.url==='https://api.x.com/2/tweets');
+  assert.equal(tweets.length,2);
+  const flow=await h.flow.getFlow(DAY);
+  assert.equal(flow.slots.zh.status,'posted');
+  assert.equal(flow.slots.en.status,'posted');
+});
+test('/postnow：终审没通过时不发',async()=>{
+  const h=harness({env:{PUBLISH_ENABLED:'true'}});
+  await toAwaitingFinal(h);
+  assert.equal(await h.flow.postNow(DAY),false);
+  assert.equal(h.log.x.length,0);
+});

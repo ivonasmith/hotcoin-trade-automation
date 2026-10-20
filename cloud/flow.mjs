@@ -402,6 +402,19 @@ export class Flow {
       return false;
     }
   }
+  // The reviewer asked for the post now instead of waiting for the scheduled time. Same at-most-once claim as the alarm.
+  async postNow(day) {
+    const flow=await this.getFlow(day);
+    if(!flow || flow.status!=='final_approved') { await this.say('现在不能发：今天的图片与正式稿还没有终审通过。'); return false; }
+    let fired=0;
+    for(const lang of LANGS) {
+      const slot=(await this.getFlow(day)).slots?.[lang];
+      if(slot?.status==='scheduled') { await this.fire(day,lang); fired++; }
+      else await this.say(`${LANG_NAME[lang]}版当前状态是 ${slot?.status||'没有排期'}，这次不重复发。`);
+    }
+    await this.arm();
+    return fired>0;
+  }
   async lateDecision(day,lang,post) {
     if(!LANGS.includes(lang)) return false;
     if(!post) {
