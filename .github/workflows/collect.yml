@@ -9,8 +9,13 @@ on:
         description: 额外热点代币，以空格分隔（选填）
         required: false
         default: ''
+      replay_run_id:
+        description: 只重试上传：填入一次已成功取数的运行编号（选填；快照必须在3小时内）
+        required: false
+        default: ''
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: hotcoin-collect
   cancel-in-progress: false
@@ -34,10 +39,10 @@ jobs:
           console.log(beijingDay(),result.reason);
           JS
       - name: 安装数据依赖
-        if: steps.calendar.outputs.proceed == 'true'
+        if: steps.calendar.outputs.proceed == 'true' && !inputs.replay_run_id
         run: python -m pip install -r pipeline/requirements.txt
       - name: 运行独立取数副本
-        if: steps.calendar.outputs.proceed == 'true'
+        if: steps.calendar.outputs.proceed == 'true' && !inputs.replay_run_id
         env:
           EXTRA_SYMBOLS: ${{ inputs.symbols }}
         run: |
@@ -49,41 +54,24 @@ jobs:
           subprocess.run([sys.executable,'pipeline/run_data.py',*symbols],check=True)
           PYTHON
       - name: 保存取数验证结果
-        if: always() && steps.calendar.outputs.proceed == 'true'
+        if: always() && steps.calendar.outputs.proceed == 'true' && !inputs.replay_run_id
         uses: actions/upload-artifact@v4
         with:
           name: hotcoin-collection-${{ github.run_id }}
           path: runtime/
           retention-days: 3
           if-no-files-found: ignore
+      - name: 复用上次取数结果（仅重试上传）
+        if: steps.calendar.outputs.proceed == 'true' && inputs.replay_run_id
+        uses: actions/download-artifact@v4
+        with:
+          name: hotcoin-collection-${{ inputs.replay_run_id }}
+          path: runtime
+          run-id: ${{ inputs.replay_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: 上传当日快照到审核后台
         if: steps.calendar.outputs.proceed == 'true' && success()
         env:
           WORKER_INGEST_URL: ${{ secrets.WORKER_INGEST_URL }}
           PIPELINE_SECRET: ${{ secrets.PIPELINE_SECRET }}
-        run: |
-          python - <<'PYTHON'
-          import json,os,pathlib,urllib.request
-          attempts=sorted(pathlib.Path('runtime').glob('collection-*'),key=lambda p:p.stat().st_mtime)
-          if not attempts:
-              raise SystemExit('没有找到本次取数输出')
-          latest=attempts[-1]
-          report=json.loads((latest/'report.json').read_text())
-          summary=json.loads((latest/'每日汇总.json').read_text())
-          payload=json.dumps({
-              'day':__import__('datetime').datetime.now(__import__('datetime').timezone(__import__('datetime').timedelta(hours=8))).date().isoformat(),
-              'report':report,'summary':summary,
-              'four_lines':(latest/'送审稿四行.txt').read_text() if (latest/'送审稿四行.txt').exists() else ''
-          },ensure_ascii=False).encode()
-          url=os.environ.get('WORKER_INGEST_URL','').strip()
-          secret=os.environ.get('PIPELINE_SECRET','').strip()
-          if not url or not secret:
-              raise SystemExit('缺少WORKER_INGEST_URL或PIPELINE_SECRET仓库Secret')
-          req=urllib.request.Request(url,data=payload,method='POST',headers={
-              'Authorization':'Bearer '+secret,'Content-Type':'application/json'})
-          with urllib.request.urlopen(req,timeout=60) as response:
-              result=json.loads(response.read())
-          if not result.get('ok'):
-              raise SystemExit('后台拒绝快照')
-          print('快照上传完成：',result['day'])
-          PYTHON
+        run: python pipeline/upload_snapshot.py runtime
