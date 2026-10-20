@@ -2,6 +2,7 @@ import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
 import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
+import {Flow} from './flow.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
 
 const SCOPES='tweet.read tweet.write users.read media.write offline.access';
@@ -135,15 +136,33 @@ async function telegram(env,method,payload) {
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 }
+
+// Poster PNGs are sent as documents (full resolution; photos would be recompressed).
+async function telegramUpload(env,name,bytes,caption) {
+  if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
+  const form=new FormData();
+  form.append('chat_id',String(env.TELEGRAM_OWNER_ID));
+  form.append('caption',caption);
+  form.append('document',new Blob([bytes],{type:'image/png'}),name);
+  return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`,{method:'POST',body:form},60000);
+}
+async function telegramDownload(env,fileId) {
+  const info=await telegram(env,'getFile',{file_id:fileId});
+  const path=info?.result?.file_path;
+  if(!path) throw Error('Telegram没有返回文件路径');
+  const response=await fetch(`https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${path}`,{signal:AbortSignal.timeout(60000)});
+  if(!response.ok) throw Error('下载海报失败');
+  return new Uint8Array(await response.arrayBuffer());
+}
 const DEFAULT_MODEL='claude-sonnet-5-5';
 const draftPrompt=hotspots=>`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`;
-async function anthropicDraft(env,hotspots) {
+async function anthropicDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt) {
   if(!env.ANTHROPIC_API_KEY) throw Error('未配置Claude官方API');
   const model=env.ANTHROPIC_MODEL||DEFAULT_MODEL;
   const request={method:'POST',
     headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','Content-Type':'application/json'},
-    body:JSON.stringify({model,max_tokens:4000,system:DRAFT_SYSTEM,
-      messages:[{role:'user',content:draftPrompt(hotspots)}]})};
+    body:JSON.stringify({model,max_tokens:4000,system,
+      messages:[{role:'user',content:promptFn(hotspots)}]})};
   const {answer,text}=await withRetry(async()=>{
     const result=await provider('https://api.anthropic.com/v1/messages',request,45000);
     const joined=(result.content||[]).filter(block=>block.type==='text').map(block=>block.text).join('').trim();
@@ -159,11 +178,11 @@ async function bedrockCall(env,body,timeoutMs) {
     headers:{Authorization:`Bearer ${env.BEDROCK_API_KEY}`,'Content-Type':'application/json'},
     body:JSON.stringify(body)},timeoutMs);
 }
-async function bedrockDraft(env,hotspots) {
+async function bedrockDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt) {
   if(!env.BEDROCK_API_KEY) throw Error('未配置亚马逊Bedrock');
   const model=env.BEDROCK_MODEL||BEDROCK_MODEL;
-  const body={system:[{text:DRAFT_SYSTEM}],
-    messages:[{role:'user',content:[{text:draftPrompt(hotspots)}]}],
+  const body={system:[{text:system}],
+    messages:[{role:'user',content:[{text:promptFn(hotspots)}]}],
     inferenceConfig:{maxTokens:4000}};
   const {answer,text}=await withRetry(async()=>{
     const result=await bedrockCall(env,body,70000);
@@ -174,12 +193,12 @@ async function bedrockDraft(env,hotspots) {
   return {content:text,model,usage:answer.usage||null};
 }
 const GEMINI_MODEL='gemini-3.5-flash-lite';
-async function geminiDraft(env,hotspots) {
+async function geminiDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt) {
   if(!env.GEMINI_API_KEY) throw Error('未配置Gemini');
   const model=env.GEMINI_MODEL||GEMINI_MODEL;
   const request={method:'POST',headers:{'x-goog-api-key':env.GEMINI_API_KEY,'Content-Type':'application/json'},
-    body:JSON.stringify({systemInstruction:{parts:[{text:DRAFT_SYSTEM}]},
-      contents:[{role:'user',parts:[{text:draftPrompt(hotspots)}]}],
+    body:JSON.stringify({systemInstruction:{parts:[{text:system}]},
+      contents:[{role:'user',parts:[{text:promptFn(hotspots)}]}],
       generationConfig:{maxOutputTokens:4000}})};
   const {answer,text}=await withRetry(async()=>{
     const result=await provider(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,request,60000);
@@ -197,17 +216,17 @@ function draftProvider(env) {
   if(env.ANTHROPIC_API_KEY) return 'anthropic';
   return 'apinebula';
 }
-async function generateDraft(env,hotspots,which) {
+async function generateDraft(env,hotspots,which,system=DRAFT_SYSTEM,promptFn=draftPrompt) {
   const make={anthropic:anthropicDraft,bedrock:bedrockDraft,gemini:geminiDraft}[which]||apiNebulaDraft;
-  return {...await make(env,hotspots),provider:which};
+  return {...await make(env,hotspots,system,promptFn),provider:which};
 }
-async function apiNebulaDraft(env,hotspots) {
+async function apiNebulaDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt) {
   if(!env.APINEBULA_API_KEY) throw Error('未配置ApiNebula');
   const model=env.APINEBULA_MODEL||DEFAULT_MODEL;
   const request={
     method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
     body:JSON.stringify({model,max_tokens:4000,
-      messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:draftPrompt(hotspots)}]})};
+      messages:[{role:'system',content:system},{role:'user',content:promptFn(hotspots)}]})};
   // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
   const result=await withRetry(async()=>{
     const answer=await provider('https://apinebula.ai/v1/chat/completions',request,45000);
@@ -230,6 +249,39 @@ export class TradeDesk {
   async fetch(request) {
     try { return await this.route(request); }
     catch { return json({ok:false,error:'操作未完成，请检查配置后重试。'},502); }
+  }
+  async effectiveEnv() {
+    const saved=await this.ctx.storage.get('private-config');
+    return {...this.env,...(saved?await unseal(saved,this.env.TOKEN_ENCRYPTION_KEY):{})};
+  }
+  flow(env) {
+    return new Flow(this.ctx,env,{telegram,tgUpload:telegramUpload,tgDownload:telegramDownload,provider,
+      translate:(e,text,system,promptFn)=>generateDraft(e,text,draftProvider(e),system,promptFn)});
+  }
+  // Durable Object alarm: publish slots (zh 20:00 / en 21:00 Beijing) and the poster-job watchdog.
+  async alarm() {
+    await this.flow(await this.effectiveEnv()).alarm();
+  }
+  async jobs(request,url,path,env) {
+    const flow=this.flow(env);
+    const rest=path.slice('/pipeline/jobs/'.length).split('/');
+    if(rest[0]==='next' && request.method==='GET')
+      return json({ok:true,job:await flow.nextJob(url.searchParams.has('peek'))});
+    const id=decodeURIComponent(rest[0]||''),action=rest[1];
+    if(!/^(poster|ledger):\d{4}-\d{2}-\d{2}:\d+$/.test(id) || request.method!=='POST') return json({ok:false},404);
+    if(action==='file') {
+      if(Number(request.headers.get('Content-Length')||0)>16*1024*1024) return json({ok:false,error:'图片过大'},413);
+      const name=url.searchParams.get('name')||'';
+      const bytes=new Uint8Array(await request.arrayBuffer());
+      const result=await flow.receiveFile(id,name,bytes);
+      return json({ok:result.status===200,...result,status:undefined},result.status);
+    }
+    if(action==='complete') {
+      if(Number(request.headers.get('Content-Length')||0)>200000) return json({ok:false},413);
+      const result=await flow.completeJob(id,await request.json());
+      return json({ok:result.status===200,...result,status:undefined},result.status);
+    }
+    return json({ok:false},404);
   }
   async route(request) {
     const url=new URL(request.url),path=url.pathname;
@@ -267,6 +319,12 @@ export class TradeDesk {
       await this.ctx.storage.put('snapshot:'+day,{...snapshot,received_at:Date.now()});
       return json({ok:true,day,received_at:Date.now()});
     }
+    if(path.startsWith('/pipeline/jobs/')) {
+      const auth=request.headers.get('Authorization')||'';
+      if(!env.PIPELINE_SECRET || !auth.startsWith('Bearer ') || !await matches(auth.slice(7),env.PIPELINE_SECRET))
+        return json({ok:false},403);
+      return this.jobs(request,url,path,env);
+    }
     if(path.startsWith('/admin')) {
       if(!await isAdmin(request,env.ADMIN_PASSWORD))
         return page('后台登录','<p>请使用管理员凭据登录。</p>',401,{'WWW-Authenticate':'Basic realm="Trade Desk", charset="UTF-8"'});
@@ -277,7 +335,7 @@ export class TradeDesk {
         const raw=await request.text();
         if(raw.length>20000) return json({ok:false},413);
         const form=new URLSearchParams(raw),config={};
-        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','GEMINI_MODEL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER']) {
+        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','GEMINI_MODEL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER','GITHUB_DISPATCH_TOKEN','GITHUB_REPO']) {
           const value=form.get(name)?.trim();
           if(value) {
             if(value.length>2000 || /[\r\n]/.test(value)) return json({ok:false,error:'字段格式有误'},400);
@@ -286,6 +344,7 @@ export class TradeDesk {
             if(name==='ANTHROPIC_MODEL' && !/^claude-[a-z0-9-]+$/.test(value)) return json({ok:false,error:'Claude模型名格式有误'},400);
             if(name==='BEDROCK_REGION' && !/^[a-z]{2}-[a-z]+-\d$/.test(value)) return json({ok:false,error:'Bedrock区域格式有误，例如 us-east-2'},400);
             if(name==='BEDROCK_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'Bedrock模型编号格式有误'},400);
+            if(name==='GITHUB_REPO' && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return json({ok:false,error:'仓库名格式应为 owner/repo'},400);
             if(name==='GEMINI_MODEL' && !/^[a-zA-Z0-9._-]+$/.test(value)) return json({ok:false,error:'Gemini模型名格式有误'},400);
             if(name==='APINEBULA_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'ApiNebula模型名格式有误'},400);
             config[name]=value;
@@ -381,6 +440,8 @@ export class TradeDesk {
       ['BEDROCK_API_KEY','亚马逊Bedrock API Key（长期）','password'],
       ['BEDROCK_REGION','Bedrock区域（默认 us-east-2）','text'],
       ['BEDROCK_MODEL','Bedrock模型编号（默认 us.anthropic.claude-sonnet-5-5）','text'],
+      ['GITHUB_DISPATCH_TOKEN','（选填）GitHub令牌：让海报任务立即启动而不是等5分钟轮询（需 Actions 读写权限）','password'],
+      ['GITHUB_REPO','（选填）GitHub仓库 owner/repo（默认 ivonasmith/hotcoin-trade-automation）','text'],
       ['APINEBULA_API_KEY','ApiNebula API令牌','password'],
       ['APINEBULA_MODEL','ApiNebula模型名（按模型广场填写）','text']]
       .map(([name,label,type])=>`<p><label>${label}<br><input style="width:95%;font:inherit;padding:8px" name="${name}" type="${type}" autocomplete="off" placeholder="${env[name]?'已保存；留空保持':'待填写'}"></label></p>`).join('');
@@ -445,7 +506,9 @@ export class TradeDesk {
     }
     if(text==='/status') {
       const day=beijingDay(),draft=await this.ctx.storage.get('draft:'+day);
-      await reply(draft?`今日送审稿状态：${draft.status}；模型：${draft.model}`:'今天还没有送审稿。');
+      const flow=await this.ctx.storage.get('flow:'+day);
+      const slots=flow?.slots?Object.entries(flow.slots).map(([lang,slot])=>`${lang==='zh'?'中文':'英文'}：${slot.status}`).join('，'):'';
+      await reply(draft?`今日送审稿状态：${draft.status}；模型：${draft.model}${flow?`\n正式流程：${flow.status}${flow.issue?`（第${flow.issue}期）`:''}${flow.failure?'；原因：'+flow.failure:''}${slots?'\n发布安排：'+slots:''}${flow.ledger_status?'\n台账：'+flow.ledger_status:''}`:''}`:'今天还没有送审稿。');
       return json({ok:true});
     }
     if(text==='/draft') return this.makeDraft(chat,env);
@@ -484,6 +547,12 @@ export class TradeDesk {
       await telegram(env,'sendMessage',{chat_id:chat,text:'今天还没有热点。请先发送 /hotspots，粘贴内容后发送 /done。'});
       return json({ok:true});
     }
+    const locked=await this.ctx.storage.get('flow:'+day);
+    if(locked && ['final_approved'].includes(locked.status)) {
+      await telegram(env,'sendMessage',{chat_id:chat,text:'今天的稿件已经终审通过并排好发布，不能再重写。'});
+      return json({ok:true});
+    }
+    if(locked) await this.ctx.storage.delete('flow:'+day); // an unfinished flow belongs to the old draft
     const existing=await this.ctx.storage.get('draft:'+day);
     if(existing?.status==='generating' && !force) {
       await telegram(env,'sendMessage',{chat_id:chat,text:'今日送审稿正在生成，请稍候。'});
@@ -525,23 +594,47 @@ export class TradeDesk {
   async callbackQuery(query,env) {
     const actor=String(query.from?.id||''),chat=query.message?.chat?.id;
     if(!env.TELEGRAM_OWNER_ID || actor!==String(env.TELEGRAM_OWNER_ID) || !chat) return json({ok:true});
-    const [action,day]=String(query.data||'').split(':');
+    const [action,day,extra]=String(query.data||'').split(':');
     if(!/^\d{4}-\d{2}-\d{2}$/.test(day||'')) return json({ok:true});
+    // Telegram may redeliver a webhook; one callback id is handled once.
+    const fresh=await this.ctx.storage.transaction(async tx=>{
+      if(await tx.get('tg-cb:'+query.id)) return false;
+      await tx.put('tg-cb:'+query.id,Date.now());
+      return true;
+    });
+    const answer=text=>telegram(env,'answerCallbackQuery',{callback_query_id:query.id,text}).catch(()=>{});
+    if(!fresh) return json({ok:true});
+    const flow=this.flow(env);
     const draft=await this.ctx.storage.get('draft:'+day);
-    if(!draft) return json({ok:true});
-    if(action==='text_ok' && draft.status==='pending_text_review') {
-      draft.status='text_approved';draft.approved=Date.now();
-      await this.ctx.storage.put('draft:'+day,draft);
-      await telegram(env,'answerCallbackQuery',{callback_query_id:query.id,text:'文字稿已通过'});
-      await telegram(env,'sendMessage',{chat_id:chat,text:'文字稿已通过。海报和正式中英文稿生成尚未启用，不会发推。'});
-    } else if(action==='text_reject' && draft.status==='pending_text_review') {
-      draft.status='text_rejected';draft.rejected=Date.now();
-      await this.ctx.storage.put('draft:'+day,draft);
-      await telegram(env,'answerCallbackQuery',{callback_query_id:query.id,text:'已退回'});
-      await telegram(env,'sendMessage',{chat_id:chat,text:'已退回。发送修改要求后再发送 /draft；当前版本不会发推。'});
-    } else {
-      await telegram(env,'answerCallbackQuery',{callback_query_id:query.id,text:'该稿件已经处理'});
-    }
+    if(!draft) { await answer('找不到这份稿件'); return json({ok:true}); }
+    const move=(from,patch)=>this.ctx.storage.transaction(async tx=>{
+      const current=await tx.get('draft:'+day);
+      if(!current || current.status!==from) return false;
+      await tx.put('draft:'+day,{...current,...patch});
+      return true;
+    });
+    if(action==='text_ok') {
+      if(await move('pending_text_review',{status:'text_approved',approved:Date.now()})) {
+        await answer('文字稿已通过');
+        await flow.startFormal(day);
+      } else await answer('该稿件已经处理');
+    } else if(action==='text_reject') {
+      if(await move('pending_text_review',{status:'text_rejected',rejected:Date.now()})) {
+        await answer('已退回');
+        await telegram(env,'sendMessage',{chat_id:chat,text:'已退回。发送修改要求后再发送 /draft；当前版本不会发推。'});
+      } else await answer('该稿件已经处理');
+    } else if(action==='formal_retry' && draft.status==='text_approved') {
+      await answer('重新处理中'); await flow.startFormal(day);
+    } else if(action==='poster_retry') {
+      await answer('重新排队'); await flow.retryPoster(day);
+    } else if(action==='final_ok') {
+      await answer(await flow.finalApprove(day,extra)?'已通过':'该稿件已经处理');
+    } else if(action==='final_reject') {
+      await answer(await flow.finalReject(day,extra)?'已退回':'该稿件已经处理');
+    } else if(action==='late_post' || action==='late_skip') {
+      await answer(action==='late_post'?'处理中':'已记下');
+      await flow.lateDecision(day,extra,action==='late_post');
+    } else await answer('该稿件已经处理');
     return json({ok:true});
   }
 }

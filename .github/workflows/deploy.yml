@@ -1,0 +1,33 @@
+name: 部署审核后台
+on:
+  push:
+    branches: [main]
+    paths: ['cloud/**', 'calendar.mjs', 'wrangler.jsonc']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查是否配置了部署令牌
+        id: gate
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::notice title=未部署::仓库没有 CLOUDFLARE_API_TOKEN，跳过自动部署"; echo "go=false" >> "$GITHUB_OUTPUT"; else echo "go=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          node-version: '22'
+      - name: 先跑测试再部署
+        if: steps.gate.outputs.go == 'true'
+        run: node --test tests/*.test.mjs
+      - name: 部署
+        if: steps.gate.outputs.go == 'true'
+        run: npx --yes wrangler@4 deploy

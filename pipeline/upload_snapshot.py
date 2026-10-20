@@ -37,12 +37,15 @@ def build_payload(runtime):
     four = latest / "送审稿四行.txt"
     ledger_file = Path(runtime) / "ledger.json"
     ledger = json.loads(ledger_file.read_text()) if ledger_file.exists() else None
+    facts_file = Path(runtime) / "poster_facts.json"
+    facts = json.loads(facts_file.read_text()) if facts_file.exists() else None
     return {
         "day": datetime.now(BEIJING).date().isoformat(),
         "report": report,
         "summary": summary,
         "four_lines": four.read_text() if four.exists() else "",
         "ledger": ledger,
+        "poster_facts": facts,
     }
 
 

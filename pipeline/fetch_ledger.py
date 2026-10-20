@@ -89,6 +89,18 @@ def parse_sections(blocks, token, get):
     return sections
 
 
+LOG_HEADER = ["日期", "期号", "标的", "变更", "价格", "币价盈亏", "账户盈亏", "依据", "记录标记"]
+TERMINAL = ("公开作废", "过期作废", "止损了结")
+
+
+def parse_log(rows):
+    """六、状态变更记录: append-only rows written by the program. Returns dicts keyed by header name."""
+    if not rows:
+        return []
+    header = rows[0]
+    return [dict(zip(header, row)) for row in rows[1:] if len(row) >= len(LOG_HEADER)]
+
+
 def build_ledger(sections):
     def find(prefix):
         for title, rows in sections.items():
@@ -99,20 +111,50 @@ def build_ledger(sections):
     if summary_rows is None or active_rows is None:
         raise RuntimeError("台账页面里没找到“一、汇总”或“二、当前在场”表格")
     summary = {row[0]: row[1] for row in summary_rows[1:] if len(row) >= 2}
+    log = parse_log(find("六、"))
+    # The log is append-only; the newest entry per (issue, symbol) decides the effective status.
+    latest = {}
+    for entry in log:
+        latest[(entry.get("期号"), entry.get("标的"))] = entry.get("变更")
     header = active_rows[0]
     active = []
     for row in active_rows[1:]:
         record = {KEEP[name]: row[i] for i, name in enumerate(header) if name in KEEP and i < len(row)}
+        change = latest.get((record.get("issue"), record.get("symbol")))
+        if change in TERMINAL:
+            continue
+        if change == "成交":
+            record["status"] = "持仓中"
         if record.get("status") in ACTIVE_STATES:
             for key in ("entry", "stop", "target", "size"):
                 record[key] = to_number(record.get(key))
             active.append(record)
+    closed_recent = []
+    for entry in reversed(log):  # newest log entries first
+        if entry.get("变更") == "止损了结" and entry.get("账户盈亏"):
+            closed_recent.append({"issue": entry["期号"], "symbol": entry["标的"],
+                                  "pct": entry.get("币价盈亏") or "", "usd": usd_text(entry["账户盈亏"])})
+    for row in (find("三、") or [])[1:]:
+        if len(row) >= 14 and row[9] == "已了结":
+            closed_recent.append({"issue": row[0], "symbol": row[2], "pct": row[12], "usd": usd_text(row[13])})
+    closed_recent = [item for item in closed_recent if item["pct"][:1] in "+-"][:6]
     updated = re.search(r"\d{4}-\d{2}-\d{2}", summary.get("更新至", ""))
+    issue = re.search(r"第\s*(\d+)\s*期", summary.get("更新至", ""))
+    counts = {"closed": int(to_number(summary.get("已了结笔数")) or 0),
+              "open": sum(1 for r in active if r["status"] == "持仓中"),
+              "pending": sum(1 for r in active if r["status"] == "挂单中")}
     return {"ok": True, "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "updated_to": updated.group(0) if updated else None,
+            "updated_issue": int(issue.group(1)) if issue else None,
             "equity_usd": to_number(summary.get("当前账户资金")),
             "cumulative_pnl_usd": to_number(summary.get("累计盈亏")),
+            "counts": counts, "closed_recent": closed_recent, "log_entries": len(log),
             "active": active}
+
+
+def usd_text(text):
+    """'+50.8 美元' -> '+50.8 USD' (the poster's closed-trade cells)."""
+    return re.sub(r"\s*美元", " USD", text or "").strip()
 
 
 def fetch_ledger(url, token, get=notion_get):
