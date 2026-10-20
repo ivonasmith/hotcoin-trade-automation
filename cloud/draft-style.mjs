@@ -123,9 +123,14 @@ export function lintDraft(content,plan=null,hotspots=null) {
     }
   }
   if(hotspots!==null) {
-    const source=String(hotspots).replace(/,/g,'');
+    // A figure counts as sourced when it equals, or is a rounding of, a number in the hotspot text (5.266 -> 5.27).
+    const sourceNumbers=[...String(hotspots).replace(/,/g,'').matchAll(/\d+(?:\.\d+)?/g)].map(m=>Number(m[0]));
+    const sourced=text=>{
+      const value=Number(text.replace(/,/g,'')),decimals=(text.split('.')[1]||'').length;
+      return sourceNumbers.some(s=>Math.abs(s-value)<1e-9 || Math.abs(Number(s.toFixed(decimals))-value)<1e-9 || (s>0 && Math.abs(s-value)/s<=0.006));
+    };
     const unsourced=[...new Set([...body.matchAll(/([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:亿|万)?[^，。；\n]{0,10}（据报道）/g)]
-      .map(m=>m[1]).filter(n=>!source.includes(n.replace(/,/g,''))))];
+      .map(m=>m[1]).filter(n=>!sourced(n)))];
     if(unsourced.length) warnings.push(`标了“据报道”的数字不在热点摘要里（${unsourced.join('、')}），可能是编的，请核实或删除`);
   }
   if(plan) warnings.push(...checkAgainstPlan(content,plan));

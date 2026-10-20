@@ -64,3 +64,9 @@ test('自检：编造的“据报道”数字、系统自述词、超过500字�
   const ok=lintDraft('审核正文：ETF净流入约3.1亿美元（据报道）。\n\n送审备注：可发。',null,'ETF净流入约3.1亿美元');
   assert.equal(ok.some(w=>w.includes('据报道')),false);
 });
+
+test('自检：热点里是5.266亿，正文四舍五入写5.27亿不算编造',()=>{
+  const body='审核正文：昨天ETF净流入约5.27亿美元（据报道）。\n\n送审备注：可发。';
+  assert.equal(lintDraft(body,null,'ETF录得约5.266亿美元净流入').some(w=>w.includes('据报道')),false);
+  assert.equal(lintDraft(body,null,'ETF录得约3.1亿美元净流入').some(w=>w.includes('据报道')),true);
+});
