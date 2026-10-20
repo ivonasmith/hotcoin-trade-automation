@@ -104,3 +104,10 @@ test('台账更新日期太旧会提示先更新；台账读取失败时回到�
   assert.equal(b.human_checks.some(item=>item.includes('台账没有读到')),true);
   assert.equal(b.notes.some(item=>item.includes('NOTION_TOKEN')),true);
 });
+test('台账核对出应更新的项目，会写进待人工事项',()=>{
+  const snap=snapshot();
+  snap.ledger=ledger([eth],{proposals:[{type:'fill',text:'第35期 ETH空单：10-19盘中触及，应记为成交'},{type:'review',text:'止损上移请人工看'}]});
+  const plan=buildOrderPlan(snap,'2026-10-20');
+  assert.equal(plan.human_checks[0].includes('台账有1项应更新'),true);
+  assert.equal(plan.human_checks[0].includes('止损上移请人工看'),false);
+});

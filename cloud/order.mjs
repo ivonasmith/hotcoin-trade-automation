@@ -66,6 +66,8 @@ export function buildOrderPlan(snapshot,day) {
   ];
   if(view && view.staleDays!==null && view.staleDays>=2)
     humanChecks.unshift(`台账最后更新到 ${view.updated_to}，已过去${view.staleDays}天，成交、作废、止损状态可能没更新，请先更新台账`);
+  const proposals=Array.isArray(snapshot?.ledger?.proposals)?snapshot.ledger.proposals.filter(item=>item.type!=='review'):[];
+  if(proposals.length) humanChecks.unshift(`台账有${proposals.length}项应更新（程序只核对、不改台账）：`+proposals.slice(0,3).map(item=>item.text).join('；'));
   if(snapshot?.ledger && snapshot.ledger.ok===false) plan.notes.push('台账读取失败：'+String(snapshot.ledger.error||'').slice(0,120));
   if(!summary || typeof summary!=='object') {
     plan.reasons.push('当日交易快照缺失，不开新单');

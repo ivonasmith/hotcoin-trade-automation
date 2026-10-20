@@ -75,7 +75,9 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
-        run: python pipeline/fetch_ledger.py runtime
+        run: |
+          python pipeline/fetch_ledger.py runtime
+          python pipeline/ledger_sync.py runtime
       - name: 上传当日快照到审核后台
         if: steps.calendar.outputs.proceed == 'true' && success()
         env:
