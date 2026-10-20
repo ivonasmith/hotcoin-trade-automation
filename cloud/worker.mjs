@@ -102,6 +102,18 @@ function bedrockFailure(error) {
   const detail=String(error?.providerMessage||'').replace(/ABSK[A-Za-z0-9+/=_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
   return {status,label,reason:byKind||byStatus||fallback,detail,attempts:Number(error?.attempts)||1};
 }
+function geminiFailure(error) {
+  const status=Number(error?.status)||null;
+  const byKind={timeout:'Gemini响应超时，没有在等待时间内返回。',network:'连不上Gemini（网络连接失败）。',
+    non_json:'Gemini返回的不是正常数据。'}[error?.kind];
+  const byStatus={400:'Gemini不接受当前模型名、请求格式，或所在地区不支持。',401:'Gemini API Key无效。',
+    403:'Gemini API Key没有权限，或所在地区不支持。',404:'Gemini找不到填写的模型名。',
+    429:'Gemini额度或调用频率已达到限制。',503:'Gemini当前繁忙，请稍后重试。'}[status];
+  const fallback=status?'Gemini暂时无法完成请求。':(error?.message||'Gemini暂时无法完成请求。');
+  const label=status?`HTTP ${status}`:({timeout:'请求超时',network:'网络错误'}[error?.kind]||'无状态码');
+  const detail=String(error?.providerMessage||'').replace(/AIza[A-Za-z0-9_-]{10,}/g,'[密钥已隐藏]').slice(0,300);
+  return {status,label,reason:byKind||byStatus||fallback,detail,attempts:Number(error?.attempts)||1};
+}
 function apiNebulaFailure(error) {
   // `status` is the real HTTP status when the server answered, otherwise null (never a made-up 502).
   const status=Number(error?.status)||null;
@@ -161,6 +173,22 @@ async function bedrockDraft(env,hotspots) {
   });
   return {content:text,model,usage:answer.usage||null};
 }
+const GEMINI_MODEL='gemini-3.5-flash-lite';
+async function geminiDraft(env,hotspots) {
+  if(!env.GEMINI_API_KEY) throw Error('未配置Gemini');
+  const model=env.GEMINI_MODEL||GEMINI_MODEL;
+  const request={method:'POST',headers:{'x-goog-api-key':env.GEMINI_API_KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({systemInstruction:{parts:[{text:DRAFT_SYSTEM}]},
+      contents:[{role:'user',parts:[{text:draftPrompt(hotspots)}]}],
+      generationConfig:{maxOutputTokens:4000}})};
+  const {answer,text}=await withRetry(async()=>{
+    const result=await provider(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,request,60000);
+    const joined=(result.candidates?.[0]?.content?.parts||[]).filter(part=>!part.thought).map(part=>part.text||'').join('').trim();
+    if(!joined) throw Error('模型未返回草稿');
+    return {answer:result,text:joined};
+  });
+  return {content:text,model,usage:answer.usageMetadata||null};
+}
 // Explicit AI_PROVIDER wins. When unset, keep today's behaviour: ApiNebula if configured, else the official API.
 function draftProvider(env) {
   if(['anthropic','apinebula','gemini','bedrock'].includes(env.AI_PROVIDER)) return env.AI_PROVIDER;
@@ -170,8 +198,7 @@ function draftProvider(env) {
   return 'apinebula';
 }
 async function generateDraft(env,hotspots,which) {
-  if(which==='gemini') throw Error('Gemini暂未接入送审稿，请在后台改选Claude官方或ApiNebula');
-  const make={anthropic:anthropicDraft,bedrock:bedrockDraft}[which]||apiNebulaDraft;
+  const make={anthropic:anthropicDraft,bedrock:bedrockDraft,gemini:geminiDraft}[which]||apiNebulaDraft;
   return {...await make(env,hotspots),provider:which};
 }
 async function apiNebulaDraft(env,hotspots) {
@@ -250,7 +277,7 @@ export class TradeDesk {
         const raw=await request.text();
         if(raw.length>20000) return json({ok:false},413);
         const form=new URLSearchParams(raw),config={};
-        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER']) {
+        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','GEMINI_MODEL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER']) {
           const value=form.get(name)?.trim();
           if(value) {
             if(value.length>2000 || /[\r\n]/.test(value)) return json({ok:false,error:'字段格式有误'},400);
@@ -259,6 +286,7 @@ export class TradeDesk {
             if(name==='ANTHROPIC_MODEL' && !/^claude-[a-z0-9-]+$/.test(value)) return json({ok:false,error:'Claude模型名格式有误'},400);
             if(name==='BEDROCK_REGION' && !/^[a-z]{2}-[a-z]+-\d$/.test(value)) return json({ok:false,error:'Bedrock区域格式有误，例如 us-east-2'},400);
             if(name==='BEDROCK_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'Bedrock模型编号格式有误'},400);
+            if(name==='GEMINI_MODEL' && !/^[a-zA-Z0-9._-]+$/.test(value)) return json({ok:false,error:'Gemini模型名格式有误'},400);
             if(name==='APINEBULA_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'ApiNebula模型名格式有误'},400);
             config[name]=value;
           }
@@ -346,7 +374,8 @@ export class TradeDesk {
     const ready=Boolean(env.X_CLIENT_ID && env.X_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY);
     const fields=[['X_CLIENT_ID','X Client ID','text'],['X_CLIENT_SECRET','X Client Secret','password'],
       ['TELEGRAM_BOT_TOKEN','Telegram Bot Token','password'],['TELEGRAM_OWNER_ID','Telegram审核人ID（接通机器人后获取）','text'],
-      ['GEMINI_API_KEY','Gemini API Key（备用）','password'],
+      ['GEMINI_API_KEY','Gemini API Key','password'],
+      ['GEMINI_MODEL','Gemini模型名（默认 gemini-3.5-flash-lite）','text'],
       ['ANTHROPIC_API_KEY','Claude官方 API Key','password'],
       ['ANTHROPIC_MODEL','Claude官方模型名（默认 claude-sonnet-5-5）','text'],
       ['BEDROCK_API_KEY','亚马逊Bedrock API Key（长期）','password'],
@@ -484,9 +513,9 @@ export class TradeDesk {
           {text:'↩️ 退回重写',callback_data:`text_reject:${day}`}
         ]]}});
     } catch(error) {
-      const failure=({anthropic:anthropicFailure,bedrock:bedrockFailure}[which]||apiNebulaFailure)(error);
+      const failure=({anthropic:anthropicFailure,bedrock:bedrockFailure,gemini:geminiFailure}[which]||apiNebulaFailure)(error);
       await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),provider:which,
-        model:(which==='anthropic'?env.ANTHROPIC_MODEL:which==='bedrock'?(env.BEDROCK_MODEL||BEDROCK_MODEL):env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
+        model:(which==='anthropic'?env.ANTHROPIC_MODEL:which==='bedrock'?(env.BEDROCK_MODEL||BEDROCK_MODEL):which==='gemini'?(env.GEMINI_MODEL||GEMINI_MODEL):env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
       await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}可发送 /draft 再试。`});
     }
     return json({ok:true});

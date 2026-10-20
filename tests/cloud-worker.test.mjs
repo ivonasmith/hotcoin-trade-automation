@@ -382,12 +382,40 @@ test('官方Claude过载529时自动重试一次并成功',async()=>{
     assert.equal(entries.get('draft:'+day).status,'pending_text_review');
   } finally {restore();}
 });
-test('选了Gemini但尚未接入出稿时明确说明，不静默失败',async()=>{
-  const {desk,calls,restore}=draftSetup(()=>{throw Error('x');},{AI_PROVIDER:'gemini'});
+test('选Gemini后用generateContent出稿：密钥头、system指令、跳过思考块',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Error('不应调用ApiNebula');},{AI_PROVIDER:'gemini',GEMINI_API_KEY:'AIzaSecretSecretSecret'});
+  const old=globalThis.fetch,seen=[];
+  const inner=globalThis.fetch;
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).includes('generativelanguage.googleapis.com')) {
+      seen.push({url:String(url),headers:options.headers,body:JSON.parse(options.body)});
+      return Response.json({candidates:[{content:{parts:[{text:'内部思考',thought:true},{text:'审核正文：今天不开新单。\n\n送审备注：可发。'}]}}]});
+    }
+    return inner(url,options);
+  };
   try {
     await desk.makeDraft(123,desk.env);
-    assert.equal(calls.telegram.at(-1).text.includes('Gemini暂未接入'),true);
-  } finally {restore();}
+    assert.equal(seen[0].url.includes('/models/gemini-3.5-flash-lite:generateContent'),true);
+    assert.equal(seen[0].headers['x-goog-api-key'],'AIzaSecretSecretSecret');
+    assert.equal(seen[0].body.systemInstruction.parts[0].text.includes('严禁提出新单'),true);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.provider,'gemini');
+    assert.equal(draft.content.includes('内部思考'),false);
+    assert.equal(draft.content.includes('今天不开新单'),true);
+  } finally {globalThis.fetch=old;restore();}
+});
+test('Gemini返回400时说明可能是地区或模型名问题，且不泄露密钥',async()=>{
+  const {desk,entries,day,calls,restore}=draftSetup(()=>{throw Error('x');},{AI_PROVIDER:'gemini',GEMINI_API_KEY:'AIzaSecretSecretSecret'});
+  const inner=globalThis.fetch;
+  globalThis.fetch=async(url,options)=>String(url).includes('generativelanguage')
+    ?Response.json({error:{message:'bad AIzaSecretSecretSecret'}},{status:400}):inner(url,options);
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(entries.get('draft:'+day).status,'generation_failed');
+    const text=calls.telegram.at(-1).text;
+    assert.equal(text.includes('Gemini'),true);
+    assert.equal(text.includes('AIzaSecretSecretSecret'),false);
+  } finally {globalThis.fetch=inner;restore();}
 });
 
 const bedrockOk=()=>Response.json({output:{message:{role:'assistant',content:[{reasoningContent:{reasoningText:{text:'想一下'}}},{text:'审核正文：今天不开新单。'},{text:'\n\n送审备注：可发。'}]}},usage:{inputTokens:10,outputTokens:20}});
