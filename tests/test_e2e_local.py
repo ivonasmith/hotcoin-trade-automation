@@ -115,7 +115,7 @@ class EndToEnd(unittest.TestCase):
         self.run_runner(notion)
         texts = notion.texts(notion.table_by_title("二、"))
         self.assertEqual(texts[-1][:3], ["38", DAY, "ETH"])
-        self.assertEqual(len(notion.texts(notion.table_by_title("四、"))), 5)
+        self.assertEqual(len(notion.texts(notion.table_by_title("四、"))), 6)
         self.assertEqual(notion.texts(notion.table_by_title("六、"))[1][3], "过期作废")
         self.run_runner(notion)  # nothing left to do; the ledger is not written twice
         self.assertEqual(len(notion.texts(notion.table_by_title("二、"))), 4)

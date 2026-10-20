@@ -92,7 +92,7 @@ test('从Telegram按钮到终审：文字通过→正式稿→出图→4张图�
     await r.desk.fetch(callback('c4',`final_ok:${DAY}:1`));
     const ledger=await (await r.desk.fetch(new Request('https://desk.test/pipeline/jobs/next',{headers:bearer}))).json();
     assert.equal(ledger.job.type,'ledger');
-    assert.equal(ledger.job.payload.conditions.length,3);
+    assert.equal(ledger.job.payload.conditions.length,4);
     assert.equal((await r.desk.ctx.storage.get('flow:'+DAY)).status,'final_approved');
     assert.equal(sent(r).filter(t=>t.startsWith('图片与正式稿已通过')).length,1);
     await r.desk.alarm();   // alarm entry point works with the merged env

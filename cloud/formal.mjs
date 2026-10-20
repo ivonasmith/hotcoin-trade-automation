@@ -133,11 +133,13 @@ export function ledgerPayload({day,issue,draft,snapshot}) {
     payload.order={symbol:o.symbol,tier:'慢档日线',size:Number(o.size.toFixed(2)),entry:o.entry,stop:o.stop,target:o.target};
     payload.note=`程序按已审核送审稿写入。仓位${o.size_text}（名义约${o.amount_usd}美元，止损约亏${risk}美元，到目标约赚${gain}美元）`
       +(o.path?`；放行路径：${o.path}`:'')
-      +`；成交前日线收盘站上MA50${o.cancel_ma50?`（约${fmtPrice(o.cancel_ma50)}）`:''}则作废，成交前费率读数转负则撤单；`
+      +`；成交前日线收盘站上MA50${o.cancel_ma50?`（约${fmtPrice(o.cancel_ma50)}）`:''}则作废，成交前价格先跌到目标（${fmtPrice(o.target)}）则作废，成交前费率读数转负则撤单；`
       +`成交后2R（${fmtPrice(o.r2)}）止损下移到进场价，3R（${fmtPrice(o.r3)}）跟随MA20下移，止损只往盈利方向移。到期${expiry}。`;
     payload.conditions=[
       {condition:`成交前${o.symbol}日线收盘价≥当日MA50${o.cancel_ma50?`（${day}约${fmtPrice(o.cancel_ma50)}）`:''}`,
         action:'本单作废（趋势已破条件不成立），下一期写明',triggered:`否（未成交；${day}日线未收盘）`,conclusion:'每期复核'},
+      {condition:`成交前${o.symbol}价格先跌到目标${fmtPrice(o.target)}`,action:'本单作废（目标已先到，不再追空）',
+        triggered:'否（未成交，价格未到目标）',conclusion:'每期复核'},
       {condition:`成交前${o.symbol}资金费率年化转负`,action:'撤单（空头也拥挤）',
         triggered:'否（发布时费率读数未转负）',conclusion:'每期复核'},
       {condition:`成交后价格到${fmtPrice(o.r2)}（2R）/ ${fmtPrice(o.r3)}（3R）`,

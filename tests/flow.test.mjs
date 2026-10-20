@@ -98,7 +98,9 @@ test('splitDraft与正文校验',()=>{
 test('台账任务：只带真正的状态变化，新单带3条条件和程序写的备注',()=>{
   const payload=ledgerPayload({day:DAY,issue:37,draft:{order:ORDER},snapshot:SNAPSHOT});
   assert.equal(payload.proposals.length,2);
-  assert.equal(payload.conditions.length,3);
+  assert.equal(payload.conditions.length,4);
+  assert.ok(payload.conditions.some(c=>/先跌到目标/.test(c.condition)),'先跌到目标就作废也要登记');
+  assert.match(payload.note,/先跌到目标/);
   assert.equal(payload.order.size,0.12);
   assert.match(payload.note,/2,482\.15/);
   assert.equal(ledgerPayload({day:DAY,issue:37,draft:{order:null},snapshot:{ledger:{proposals:[]}}}),null);
