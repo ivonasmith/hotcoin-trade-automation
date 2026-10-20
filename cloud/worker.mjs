@@ -142,7 +142,7 @@ async function anthropicDraft(env,hotspots) {
   const model=env.ANTHROPIC_MODEL||DEFAULT_MODEL;
   const request={method:'POST',
     headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','Content-Type':'application/json'},
-    body:JSON.stringify({model,max_tokens:1800,system:DRAFT_SYSTEM,
+    body:JSON.stringify({model,max_tokens:4000,system:DRAFT_SYSTEM,
       messages:[{role:'user',content:draftPrompt(hotspots)}]})};
   const {answer,text}=await withRetry(async()=>{
     const result=await provider('https://api.anthropic.com/v1/messages',request,45000);
@@ -150,7 +150,7 @@ async function anthropicDraft(env,hotspots) {
     if(!joined) throw Error('模型未返回草稿');
     return {answer:result,text:joined};
   });
-  return {content:text,model,usage:answer.usage||null};
+  return {content:text,model,usage:answer.usage||null,truncated:answer.stop_reason==='max_tokens'};
 }
 const BEDROCK_MODEL='us.anthropic.claude-sonnet-5-5';
 const bedrockUrl=env=>`https://bedrock-runtime.${env.BEDROCK_REGION||'us-east-2'}.amazonaws.com/model/${encodeURIComponent(env.BEDROCK_MODEL||BEDROCK_MODEL)}/converse`;
@@ -206,7 +206,7 @@ async function apiNebulaDraft(env,hotspots) {
   const model=env.APINEBULA_MODEL||DEFAULT_MODEL;
   const request={
     method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
-    body:JSON.stringify({model,max_tokens:1800,
+    body:JSON.stringify({model,max_tokens:4000,
       messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:draftPrompt(hotspots)}]})};
   // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
   const result=await withRetry(async()=>{
@@ -216,7 +216,7 @@ async function apiNebulaDraft(env,hotspots) {
     return answer;
   });
   const content=result.choices[0].message.content;
-  return {content:content.trim(),model,usage:result.usage||null};
+  return {content:content.trim(),model,usage:result.usage||null,truncated:result.choices[0].finish_reason==='length'};
 }
 export default {
   async fetch(request,env) {
@@ -503,7 +503,9 @@ export class TradeDesk {
       const generated=await generateDraft(env,hotspots+verified+'\n\n'+orderBlock(plan),which);
       // Deterministic safety nets: $ prefix on coins, and a format check the reviewer can see.
       const content=normalizeTickers(generated.content,collectTickers(snapshot,hotspots));
-      const lint=lintDraft(content,plan);
+      const lint=lintDraft(content,plan,hotspots);
+      if(generated.truncated) lint.push('稿件在中途被截断，送审备注可能不完整，请退回重写');
+      if(!content.includes('送审备注：')) lint.push('稿件缺少送审备注');
       const draft={...generated,content,lint,order:plan.order,order_allowed:plan.allowed,status:'pending_text_review',created:Date.now(),day};
       await this.ctx.storage.put('draft:'+day,draft);
       const warning=lint.length?`\n\n⚠ 格式自检：${lint.join('；')}。可点“退回重写”。`:'';

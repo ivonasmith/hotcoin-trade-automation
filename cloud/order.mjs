@@ -40,13 +40,33 @@ function whyNoCandidate(symbol,screen) {
   return `$${symbol}：上方没有够格的压力位`;
 }
 
+
+const ACTIVE=['挂单中','持仓中'];
+const MAX_PENDING=5,MAX_SAME_SIDE_MAJOR=3,MAX_NOTIONAL=20000;
+// Reads the ledger the collection job copied from Notion. Returns the facts and the blockers it implies.
+function ledgerView(ledger,day) {
+  if(!ledger || ledger.ok!==true || !Array.isArray(ledger.active)) return null;
+  const active=ledger.active.filter(item=>ACTIVE.includes(item.status));
+  const pending=active.filter(item=>item.status==='挂单中').length;
+  const majorShorts=active.filter(item=>item.side==='做空' && CORE.includes(item.symbol));
+  const notional=active.reduce((sum,item)=>sum+BASE_USD*(Number(item.size)||0),0);
+  const staleDays=ledger.updated_to?Math.floor((Date.parse(day+'T00:00:00Z')-Date.parse(ledger.updated_to+'T00:00:00Z'))/86400000):null;
+  return {active,pending,majorShorts,notional,staleDays,updated_to:ledger.updated_to||null,
+    symbolsWithShort:new Set(active.filter(item=>item.side==='做空').map(item=>item.symbol))};
+}
+
 export function buildOrderPlan(snapshot,day) {
   const summary=snapshot?.summary;
   const plan={allowed:false,order:null,reasons:[],human_checks:[],notes:[],day};
+  const view=ledgerView(snapshot?.ledger,day);
   const humanChecks=[
-    '台账未接入程序：请核对熔断状态、已挂单是否不超过5张、同方向主流币是否不超过3个',
+    view?'熔断阶梯程序暂未核算（连续止损、账户回撤、利润回吐），请确认没有处于停机档':
+      '台账没有读到：请核对熔断状态、已挂单是否不超过5张、同方向主流币是否不超过3个',
     '日线收盘口径：止损与作废条件以收盘价判断，请确认今日日线尚未收盘'
   ];
+  if(view && view.staleDays!==null && view.staleDays>=2)
+    humanChecks.unshift(`台账最后更新到 ${view.updated_to}，已过去${view.staleDays}天，成交、作废、止损状态可能没更新，请先更新台账`);
+  if(snapshot?.ledger && snapshot.ledger.ok===false) plan.notes.push('台账读取失败：'+String(snapshot.ledger.error||'').slice(0,120));
   if(!summary || typeof summary!=='object') {
     plan.reasons.push('当日交易快照缺失，不开新单');
     return plan;
@@ -87,12 +107,26 @@ export function buildOrderPlan(snapshot,day) {
       plan.human_checks.push(`$${symbol} 过了筛选但不是主流币，需先完成迷因币/小币裁决，程序不出单`);
       continue;
     }
+    if(view?.symbolsWithShort.has(symbol)) {
+      plan.reasons.push(`$${symbol}：台账里已经有一张在场的空单，不重复挂`);
+      continue;
+    }
     const first=candidates.find(item=>num(item['进场']) && num(item['止损']) && num(item['目标']));
     if(first) eligible.push({symbol,screen,candidate:first});
   }
   if(!eligible.length) {
     if(!plan.reasons.length) plan.reasons.push('今天没有币种同时过门①②③并有压力位候选');
     return plan;
+  }
+  if(view) {
+    if(view.pending>=MAX_PENDING) {
+      plan.reasons.unshift(`台账里已有${view.pending}张挂单，达到${MAX_PENDING}张上限，要等有单成交、作废或到期才能新增`);
+      return plan;
+    }
+    if(view.majorShorts.length>=MAX_SAME_SIDE_MAJOR) {
+      plan.reasons.unshift(`台账里主流币空单已有${view.majorShorts.length}张，达到同向${MAX_SAME_SIDE_MAJOR}张上限`);
+      return plan;
+    }
   }
   // One new order per post: main coins in fixed order, then the nearest level.
   eligible.sort((a,b)=>CORE.indexOf(a.symbol)-CORE.indexOf(b.symbol)
@@ -129,7 +163,13 @@ export function buildOrderPlan(snapshot,day) {
     path:screen['门③路径']||null,
     funding_7d:num(screen['费率7日均']),funding_30d:num(screen['费率30日均'])
   };
+  if(view && view.notional+BASE_USD*size>MAX_NOTIONAL) {
+    plan.order=null;
+    plan.reasons.unshift(`加上这张单，台账里的名义总仓位会超过${MAX_NOTIONAL}美元上限`);
+    return plan;
+  }
   plan.allowed=true;
+  if(view) plan.notes.push(`台账已读取（更新到 ${view.updated_to||'未知'}）：在场${view.active.length}张，挂单${view.pending}/${MAX_PENDING}，主流币空单${view.majorShorts.length}/${MAX_SAME_SIDE_MAJOR}，名义约${Math.round(view.notional)}美元；加上本单仍在上限内`);
   if(plan.order.touched_recent) plan.notes.push('这个价位15天内被碰过，仓位已按程序打折');
   if(multiplier<1) plan.notes.push('宏观层折扣已触发，仓位已按程序打折');
   plan.human_checks.unshift(...humanChecks);
@@ -149,7 +189,9 @@ export function orderBlock(plan) {
   } else {
     lines.push('结论：今天不开新单。正文必须明确写“今天不开新单”，严禁出现任何限价、止损价、目标价、盈亏比、仓位或有效期。');
   }
-  if(plan.reasons.length) lines.push('不出单的原因（正文用人话简述一两条，别列清单）：\n'+plan.reasons.map(item=>'- '+item).join('\n'));
+  if(plan.reasons.length) lines.push(plan.allowed
+    ?'其他币种的筛选情况（只供你写送审备注，正文一个字都不要提）：\n'+plan.reasons.map(item=>'- '+item).join('\n')
+    :'不出单的原因（正文用人话简述一两条，别列清单）：\n'+plan.reasons.map(item=>'- '+item).join('\n'));
   const notes=[...plan.notes,...plan.human_checks];
   if(notes.length) lines.push('必须写进送审备注的事项：\n'+notes.map(item=>'- '+item).join('\n'));
   return lines.join('\n');

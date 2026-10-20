@@ -74,3 +74,33 @@ test('正文与程序不一致会被自检拦下',()=>{
 });
 
 test('有效期跨月',()=>{ assert.equal(expiryText('2026-10-20'),'11月4日'); assert.equal(expiryText('2026-12-25'),'1月9日'); });
+
+const ledger=(active,extra={})=>({ok:true,updated_to:'2026-10-20',active,...extra});
+const eth={symbol:'ETH',side:'做空',status:'挂单中',size:0.12};
+test('台账读到后：不再要求人工核挂单数，并把台账事实写进备注',()=>{
+  const snap=snapshot();snap.ledger=ledger([eth]);
+  const plan=buildOrderPlan(snap,'2026-10-20');
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.human_checks.some(item=>item.includes('台账没有读到')),false);
+  assert.equal(plan.human_checks.some(item=>item.includes('熔断')),true);
+  assert.equal(plan.notes.some(item=>item.includes('挂单1/5')&&item.includes('主流币空单1/3')),true);
+});
+test('台账：挂单满5张、同向主流币满3张、同币已有空单都不出新单',()=>{
+  const full=snapshot();full.ledger=ledger(Array.from({length:5},(_,i)=>({symbol:'X'+i,side:'做多',status:'挂单中',size:0.33})));
+  const a=buildOrderPlan(full,'2026-10-20');
+  assert.equal(a.allowed,false);assert.equal(a.reasons[0].includes('5张上限'),true);
+  const three=snapshot();three.ledger=ledger(['ETH','SOL','XRP'].map(symbol=>({symbol,side:'做空',status:'持仓中',size:0.12})));
+  assert.equal(buildOrderPlan(three,'2026-10-20').allowed,false);
+  const dup=snapshot();dup.ledger=ledger([{symbol:'BTC',side:'做空',status:'挂单中',size:0.12}]);
+  const d=buildOrderPlan(dup,'2026-10-20');
+  assert.equal(d.allowed,false);assert.equal(d.reasons.some(item=>item.includes('已经有一张在场的空单')),true);
+});
+test('台账更新日期太旧会提示先更新；台账读取失败时回到人工核对',()=>{
+  const old=snapshot();old.ledger=ledger([eth],{updated_to:'2026-10-16'});
+  const plan=buildOrderPlan(old,'2026-10-20');
+  assert.equal(plan.human_checks[0].includes('已过去4天'),true);
+  const bad=snapshot();bad.ledger={ok:false,error:'没有设置 NOTION_TOKEN'};
+  const b=buildOrderPlan(bad,'2026-10-20');
+  assert.equal(b.human_checks.some(item=>item.includes('台账没有读到')),true);
+  assert.equal(b.notes.some(item=>item.includes('NOTION_TOKEN')),true);
+});

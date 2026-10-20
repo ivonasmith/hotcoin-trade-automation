@@ -10,6 +10,8 @@ export const DRAFT_SYSTEM=`你是“链上大叔｜热币分析”的送审稿�
 - 迷因币裁决未完成，不得提出迷因币新单。旧单不复活。
 - 今天能不能开新单、开哪一张、限价、距现价%、止损、目标、盈亏比、仓位、有效期，全部由用户消息里的“程序已定的交易决定”给出。你只负责写，不得更改、取整、换算、另选价位，也不得自己判断“可以开”或“不开”。程序写“今天不开新单”，正文就只能写今天不开新单。
 - 来自热点摘要、未核实的数字，正文里在数字后标“（据报道）”，并在送审备注里逐条列为待核实。
+- 正文里除程序给的订单数字外，每一个数字都必须能在用户消息的热点摘要或快照里找到原文；找不到就不写，不得从样例或记忆里取数。
+- 有新单时，正文只写这一张单。不提其他币有没有信号、过没过筛选、为什么不写；热点里被争论的币，只说它的争点为什么不构成开单理由。
 
 二、写法标准（照第六节样例的语感写）
 1. 第一句就是今天的主线判断加我的动作（挂单、撤单、保留，或“今天不开新单”），读者只看前两行也知道你要说什么。
@@ -40,11 +42,11 @@ export const DRAFT_SYSTEM=`你是“链上大叔｜热币分析”的送审稿�
 五、输出格式
 严格分两段：第一段以“审核正文：”开头；第二段以“送审备注：”开头。不要输出英文版或海报文案。
 
-六、达标样例（节选，只学写法；样例里的币种、价位、日期全部过期，禁止引用其中任何数字）
+六、达标样例（节选，只学写法；样例里的币种、价位、日期、比例全是虚构的，禁止引用其中任何数字）
 审核正文：今天大家还在争清算后是不是健康洗盘，我不靠这句话开单。
 
 今天我挂一张$ETH远档空单，期权到期日，贴着现价的单不碰。
-进场限价2,585.57，距现价+4.54%；止损2,637.28，按日线收盘判断；目标2,378.72，盈亏比1:4，0.12仓，有效期到10月31日。
+进场限价1,234.56，距现价+3.21%；止损1,260.00，按日线收盘判断；目标1,132.80，盈亏比1:4，0.17仓，有效期到12月1日。
 
 $ETH最近连续两天收在20日、50日均线下方，近7天平均费率为正，上方老压力位又贴着20日线，我在这里等反弹。这单最怕反弹变成趋势修复。$BTC上涨趋势仍没断，仍可能带着$ETH往上走。成交前，如果日线收盘站上当日50日线，单子作废；当前资金费率年化读数转负，就撤单。
 
@@ -52,7 +54,7 @@ $ETH最近连续两天收在20日、50日均线下方，近7天平均费率为�
 
 对照（同一件事）：
 ✕ 止损放在八万三千九百六，$BTC 跌破二十日均线，据热点摘要，待核实，我没自己算。
-✓ 止损83,960，$BTC 日线收盘跌破20日均线就离场；ETF单日净流入约5.27亿美元（据报道）。`;
+✓ 止损按程序给的价位写，$BTC 日线收盘跌破20日均线就离场；ETF单日净流入约N亿美元（据报道，N取自热点摘要，没有就不写这句）。`;
 
 const CASHTAG=/\$([A-Z][A-Z0-9]{1,9})(?![A-Za-z0-9])/g;
 const CAPS=/(?<![A-Za-z0-9$])[A-Z]{3,6}(?![A-Za-z0-9])/g;
@@ -92,12 +94,12 @@ export function normalizeTickers(text,tickers) {
   return at<0?fix(text):fix(text.slice(0,at))+fix(text.slice(at));
 }
 
-const INTERNAL_WORDS=['位置年龄','回踩间隔','净期望','期望值','回测分档','样本数','枢轴','pivot','R值',
+const INTERNAL_WORDS=['筛选','程序','信号我没写','位置年龄','回踩间隔','净期望','期望值','回测分档','样本数','枢轴','pivot','R值',
   '快照','数据包','素材','脚本','代码','自动化','本地文件'];
 const NUMERAL_OK=new Set(['万一','千万']);
 
 // Deterministic checks on the reader-facing section only. Returns short Chinese warnings for the reviewer.
-export function lintDraft(content,plan=null) {
+export function lintDraft(content,plan=null,hotspots=null) {
   const body=String(content).split('送审备注：')[0].replace(/^\s*审核正文：/,'');
   const warnings=[];
   const numerals=[...new Set([...body.matchAll(/[零〇一二三四五六七八九十百千万亿]{2,}/g)].map(m=>m[0])
@@ -107,7 +109,7 @@ export function lintDraft(content,plan=null) {
   if(words.length) warnings.push(`正文出现内部用词（${words.join('、')}）`);
   if(/【|→|^\s*[·•]\s|^\s*\d+[.、]\s/m.test(body)) warnings.push('正文出现小标题、列表或箭头');
   const length=body.replace(/\s/g,'').length;
-  if(length>520) warnings.push(`正文${length}字，超过500字上限`);
+  if(length>500) warnings.push(`正文${length}字，超过500字上限`);
   if(/限价/.test(body)) {
     const missing=['盈亏比','有效期'].filter(word=>!body.includes(word));
     if(missing.length) warnings.push(`新单缺少：${missing.join('、')}`);
@@ -119,6 +121,12 @@ export function lintDraft(content,plan=null) {
       if(risk>0 && Math.abs(reward/risk-Number(stated[1]))>0.15)
         warnings.push(`盈亏比写的是1:${stated[1]}，按三个价位算是1:${(reward/risk).toFixed(1)}`);
     }
+  }
+  if(hotspots!==null) {
+    const source=String(hotspots).replace(/,/g,'');
+    const unsourced=[...new Set([...body.matchAll(/([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:亿|万)?[^，。；\n]{0,10}（据报道）/g)]
+      .map(m=>m[1]).filter(n=>!source.includes(n.replace(/,/g,''))))];
+    if(unsourced.length) warnings.push(`标了“据报道”的数字不在热点摘要里（${unsourced.join('、')}），可能是编的，请核实或删除`);
   }
   if(plan) warnings.push(...checkAgainstPlan(content,plan));
   return warnings;
