@@ -1,5 +1,8 @@
 name: 热币交易 · 云端取数验证
 on:
+  schedule:
+    # UTC 11:00 = 北京时间 19:00，给20:00中文稿预留审核时间。
+    - cron: '0 11 * * 1-5'
   workflow_dispatch:
     inputs:
       symbols:
@@ -53,3 +56,34 @@ jobs:
           path: runtime/
           retention-days: 3
           if-no-files-found: ignore
+      - name: 上传当日快照到审核后台
+        if: steps.calendar.outputs.proceed == 'true' && success()
+        env:
+          WORKER_INGEST_URL: ${{ secrets.WORKER_INGEST_URL }}
+          PIPELINE_SECRET: ${{ secrets.PIPELINE_SECRET }}
+        run: |
+          python - <<'PYTHON'
+          import json,os,pathlib,urllib.request
+          attempts=sorted(pathlib.Path('runtime').glob('collection-*'),key=lambda p:p.stat().st_mtime)
+          if not attempts:
+              raise SystemExit('没有找到本次取数输出')
+          latest=attempts[-1]
+          report=json.loads((latest/'report.json').read_text())
+          summary=json.loads((latest/'每日汇总.json').read_text())
+          payload=json.dumps({
+              'day':__import__('datetime').datetime.now(__import__('datetime').timezone(__import__('datetime').timedelta(hours=8))).date().isoformat(),
+              'report':report,'summary':summary,
+              'four_lines':(latest/'送审稿四行.txt').read_text() if (latest/'送审稿四行.txt').exists() else ''
+          },ensure_ascii=False).encode()
+          url=os.environ.get('WORKER_INGEST_URL','').strip()
+          secret=os.environ.get('PIPELINE_SECRET','').strip()
+          if not url or not secret:
+              raise SystemExit('缺少WORKER_INGEST_URL或PIPELINE_SECRET仓库Secret')
+          req=urllib.request.Request(url,data=payload,method='POST',headers={
+              'Authorization':'Bearer '+secret,'Content-Type':'application/json'})
+          with urllib.request.urlopen(req,timeout=60) as response:
+              result=json.loads(response.read())
+          if not result.get('ok'):
+              raise SystemExit('后台拒绝快照')
+          print('快照上传完成：',result['day'])
+          PYTHON

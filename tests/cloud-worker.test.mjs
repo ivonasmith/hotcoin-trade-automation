@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {TradeDesk} from '../cloud/worker.mjs';
+import {beijingDay} from '../calendar.mjs';
 
 function setup(overrides={}) {
   const entries=new Map();
@@ -84,6 +85,46 @@ test('Telegram请求验证secret、接收人及分段提交',async()=>{
     assert.equal([...entries.keys()].filter(k=>k.startsWith('hotspots:')).length,1);
   } finally {globalThis.fetch=old;}
 });
+test('Telegram热点完成后生成送审稿并由唯一审核人批准',async()=>{
+  const {desk,entries}=setup({TELEGRAM_WEBHOOK_SECRET:'hook-secret',TELEGRAM_BOT_TOKEN:'test-token',
+    TELEGRAM_OWNER_ID:'123',APINEBULA_API_KEY:'sk-nebula-secret',APINEBULA_MODEL:'claude-sonnet-5-5'});
+  const old=globalThis.fetch;
+  const telegramCalls=[];
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).includes('apinebula.ai')) {
+      const body=JSON.parse(options.body);
+      assert.equal(body.model,'claude-sonnet-5-5');
+      assert.equal(body.messages[0].content.includes('严禁提出新单'),true);
+      return Response.json({choices:[{message:{content:'审核正文：今天不开新单。\n\n送审备注：缺交易数据。'}}],usage:{total_tokens:20}});
+    }
+    telegramCalls.push({url:String(url),body:JSON.parse(options.body)});
+    return Response.json({ok:true});
+  };
+  const send=(id,text)=>desk.fetch(new Request('https://desk.test/telegram/webhook',{method:'POST',
+    headers:{'Content-Type':'application/json','X-Telegram-Bot-Api-Secret-Token':'hook-secret'},
+    body:JSON.stringify({update_id:id,message:{chat:{id:123,type:'private'},from:{id:123},text}})}));
+  try {
+    await send(20,'/hotspots');await send(21,'测试热点');await send(22,'/done');
+    const draft=[...entries.entries()].find(([key])=>key.startsWith('draft:'))[1];
+    assert.equal(draft.status,'pending_text_review');
+    assert.equal(telegramCalls.some(call=>call.body.reply_markup?.inline_keyboard),true);
+    await desk.fetch(new Request('https://desk.test/telegram/webhook',{method:'POST',
+      headers:{'Content-Type':'application/json','X-Telegram-Bot-Api-Secret-Token':'hook-secret'},
+      body:JSON.stringify({update_id:23,callback_query:{id:'cb1',from:{id:123},message:{chat:{id:123}},data:`text_ok:${draft.day}`}})}));
+    assert.equal(entries.get('draft:'+draft.day).status,'text_approved');
+  } finally {globalThis.fetch=old;}
+});
+test('取数快照必须认证、当天、新鲜且包含核心币',async()=>{
+  const {desk,entries}=setup({PIPELINE_SECRET:'pipeline-secret'});
+  const metrics=Object.fromEntries(['BTC','ETH','SOL','XRP','BNB'].map(symbol=>[symbol,{price:1}]));
+  const payload={day:beijingDay(),report:{ok:true,finished_at:new Date().toISOString()},summary:{指标:metrics},four_lines:'L1-L4'};
+  const send=(secret,body=payload)=>desk.fetch(new Request('https://desk.test/pipeline/snapshot',{method:'POST',
+    headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},body:JSON.stringify(body)}));
+  assert.equal((await send('bad')).status,403);
+  assert.equal((await send('pipeline-secret')).status,200);
+  assert.equal(entries.get('snapshot:'+beijingDay()).four_lines,'L1-L4');
+  assert.equal((await send('pipeline-secret',{...payload,day:'2020-01-01'})).status,400);
+});
 test('凭据加密保存、管理页不回显、空字段保留原值',async()=>{
   const {desk,entries}=setup();
   const save=values=>desk.fetch(new Request('https://desk.test/admin/config',{
@@ -136,4 +177,61 @@ test('Gemini密钥可独立保存、不回显，检查模型列表无需发帖',
   };
   try { assert.equal((await desk.fetch(adminRequest('/admin/gemini/check','POST'))).status,200); }
   finally {globalThis.fetch=old;}
+});
+test('Claude密钥和模型加密保存，连接检查不生成正文',async()=>{
+  const {desk}=setup();
+  const req=adminRequest('/admin/config','POST');
+  const save=new Request(req,{body:new URLSearchParams({ANTHROPIC_API_KEY:'claude-test-secret',
+    ANTHROPIC_MODEL:'claude-sonnet-5',AI_PROVIDER:'anthropic'})});
+  assert.equal((await desk.fetch(save)).status,303);
+  const html=await (await desk.fetch(adminRequest('/admin'))).text();
+  assert.equal(html.includes('Claude官方 API：已填写'),true);
+  assert.equal(html.includes('claude-test-secret'),false);
+  const old=globalThis.fetch;
+  globalThis.fetch=async(url,options)=>{
+    assert.equal(String(url),'https://api.anthropic.com/v1/models/claude-sonnet-5');
+    assert.equal(options.headers['x-api-key'],'claude-test-secret');
+    assert.equal(options.headers['anthropic-version'],'2023-06-01');
+    assert.equal(options.method,undefined);
+    return Response.json({id:'claude-sonnet-5',type:'model',display_name:'Claude Sonnet 5'});
+  };
+  try { assert.equal((await desk.fetch(adminRequest('/admin/anthropic/check','POST'))).status,200); }
+  finally {globalThis.fetch=old;}
+});
+test('ApiNebula令牌独立保存并用Claude兼容接口做最小检查',async()=>{
+  const {desk}=setup();
+  const req=adminRequest('/admin/config','POST');
+  const save=new Request(req,{body:new URLSearchParams({APINEBULA_API_KEY:'sk-nebula-secret',
+    APINEBULA_MODEL:'claude-sonnet-5',AI_PROVIDER:'apinebula'})});
+  assert.equal((await desk.fetch(save)).status,303);
+  const html=await (await desk.fetch(adminRequest('/admin'))).text();
+  assert.equal(html.includes('首选撰稿模型：ApiNebula'),true);
+  assert.equal(html.includes('ApiNebula：已填写'),true);
+  assert.equal(html.includes('sk-nebula-secret'),false);
+  const old=globalThis.fetch;
+  globalThis.fetch=async(url,options)=>{
+    assert.equal(options.headers.Authorization,'Bearer sk-nebula-secret');
+    assert.equal(String(url),'https://apinebula.ai/v1/chat/completions');
+    const body=JSON.parse(options.body);
+    assert.equal(body.model,'claude-sonnet-5');
+    assert.equal(body.max_tokens,8);
+    return Response.json({id:'chatcmpl_test',choices:[{message:{role:'assistant',content:'OK'}}]});
+  };
+  try { assert.equal((await desk.fetch(adminRequest('/admin/apinebula/check','POST'))).status,200); }
+  finally {globalThis.fetch=old;}
+});
+test('ApiNebula错误显示平台原因但遮盖密钥',async()=>{
+  const {desk}=setup();
+  const saveReq=adminRequest('/admin/config','POST');
+  await desk.fetch(new Request(saveReq,{body:new URLSearchParams({APINEBULA_API_KEY:'sk-nebula-secret',
+    APINEBULA_MODEL:'claude-sonnet-4-6',AI_PROVIDER:'apinebula'})}));
+  const old=globalThis.fetch;
+  globalThis.fetch=async()=>Response.json({error:{type:'permission_error',
+    message:'route denied for sk-nebula-secret'}},{status:403});
+  try {
+    const response=await desk.fetch(adminRequest('/admin/apinebula/check','POST'));
+    const html=await response.text();
+    assert.equal(html.includes('route denied'),true);
+    assert.equal(html.includes('sk-nebula-secret'),false);
+  } finally {globalThis.fetch=old;}
 });

@@ -20,13 +20,56 @@ async function provider(url,options) {
   const response=await fetch(url,{...options,signal:AbortSignal.timeout(25000)});
   let data;
   try {data=await response.json();} catch {throw Error('服务响应无法解析');}
-  if(!response.ok || data.ok===false) throw Error(`服务请求失败（HTTP ${response.status}）`);
+  if(!response.ok || data.ok===false) {
+    const error=Error(`服务请求失败（HTTP ${response.status}）`);
+    error.status=response.status;
+    error.providerType=data?.error?.type||'';
+    error.providerMessage=String(data?.error?.message||data?.error_msg||data?.message||data?.msg||data?.detail||
+      (typeof data?.error==='string'?data.error:'')||JSON.stringify(data)||'').slice(0,500);
+    throw error;
+  }
   return data;
+}
+function anthropicFailure(error) {
+  const status=Number(error?.status)||502;
+  const reason={
+    400:'请求格式或模型名不被Claude API接受。',
+    401:'API Key无效、已撤销，或复制时缺少字符。',
+    402:'Claude API账户没有可用预付额度。',
+    403:'当前API账户、地区或组织没有访问权限。',
+    404:'该API账户目前无法使用填写的模型。',
+    429:'Claude API额度或调用频率已达到限制。',
+  }[status]||'Claude API暂时无法完成检查。';
+  return {status,reason};
+}
+function apiNebulaFailure(error) {
+  const status=Number(error?.status)||502;
+  const reason={400:'ApiNebula不接受当前模型名或请求格式。',401:'ApiNebula令牌无效或不完整。',
+    402:'ApiNebula账户余额不足。',403:'令牌分组或模型列表不允许调用该模型。',
+    404:'ApiNebula没有找到该模型或Claude兼容接口。',429:'ApiNebula额度或频率已达到限制。'}[status]||'ApiNebula暂时无法完成检查。';
+  const detail=String(error?.providerMessage||'')
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
+  return {status,reason,detail};
 }
 async function telegram(env,method,payload) {
   if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+}
+const DRAFT_SYSTEM=`你是“链上大叔｜热币分析”的送审稿编辑。只根据用户提供的已核实素材写，不计算、不猜测、不补数字。
+写作规则：第一句先说当天动作或没有动作，再解释原因；第一人称；短句和自然口语；不要【】、报告式小标题、编号列表或箭头；热点只写大家在争什么以及为什么不足以直接开单；中文正文约200至500字。
+交易规则：没有交易数据、台账快照、L1-L4或P0-P3结论时，严禁提出新单、撤单、价位、仓位或止损；必须在送审备注中列出缺口。未经核实的新闻数字只能写“据热点摘要，待核实”。迷因币裁决未完成，不得提出迷因币新单。旧单不复活。
+输出严格分两段：第一段以“审核正文：”开头，给可读的中文草稿；第二段以“送审备注：”开头，说明数据缺口、未核实信息和是否允许进入正式帖子。不要输出英文版或海报文案。`;
+async function apiNebulaDraft(env,hotspots) {
+  if(!env.APINEBULA_API_KEY) throw Error('未配置ApiNebula');
+  const model=env.APINEBULA_MODEL||'claude-sonnet-5-5';
+  const result=await provider('https://apinebula.ai/v1/chat/completions',{
+    method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
+    body:JSON.stringify({model,max_tokens:1800,
+      messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`}]})});
+  const content=result.choices?.[0]?.message?.content;
+  if(typeof content!=='string' || !content.trim()) throw Error('模型未返回草稿');
+  return {content:content.trim(),model,usage:result.usage||null};
 }
 export default {
   async fetch(request,env) {
@@ -59,6 +102,24 @@ export class TradeDesk {
       if(Number(request.headers.get('Content-Length')||0)>200000) return json({ok:false},413);
       return this.inbox(await request.json(),env);
     }
+    if(path==='/pipeline/snapshot' && request.method==='POST') {
+      const auth=request.headers.get('Authorization')||'';
+      if(!env.PIPELINE_SECRET || !auth.startsWith('Bearer ') || !await matches(auth.slice(7),env.PIPELINE_SECRET))
+        return json({ok:false},403);
+      if(Number(request.headers.get('Content-Length')||0)>1500000) return json({ok:false,error:'快照过大'},413);
+      const snapshot=await request.json();
+      const day=beijingDay();
+      if(snapshot.day!==day || snapshot.report?.ok!==true || typeof snapshot.summary!=='object')
+        return json({ok:false,error:'快照日期或验证报告无效'},400);
+      const finished=Date.parse(snapshot.report.finished_at||'');
+      if(!Number.isFinite(finished) || Math.abs(Date.now()-finished)>3*3600000)
+        return json({ok:false,error:'快照超过3小时'},409);
+      const metrics=snapshot.summary?.['指标'];
+      if(!metrics || !['BTC','ETH','SOL','XRP','BNB'].every(symbol=>metrics[symbol]))
+        return json({ok:false,error:'核心币数据不完整'},400);
+      await this.ctx.storage.put('snapshot:'+day,{...snapshot,received_at:Date.now()});
+      return json({ok:true,day,received_at:Date.now()});
+    }
     if(path.startsWith('/admin')) {
       if(!await isAdmin(request,env.ADMIN_PASSWORD))
         return page('后台登录','<p>请使用管理员凭据登录。</p>',401,{'WWW-Authenticate':'Basic realm="Trade Desk", charset="UTF-8"'});
@@ -69,11 +130,14 @@ export class TradeDesk {
         const raw=await request.text();
         if(raw.length>20000) return json({ok:false},413);
         const form=new URLSearchParams(raw),config={};
-        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY']) {
+        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','AI_PROVIDER']) {
           const value=form.get(name)?.trim();
           if(value) {
             if(value.length>2000 || /[\r\n]/.test(value)) return json({ok:false,error:'字段格式有误'},400);
             if(name==='TELEGRAM_OWNER_ID' && !/^\d+$/.test(value)) return json({ok:false,error:'审核人ID应为数字'},400);
+            if(name==='AI_PROVIDER' && !['anthropic','apinebula','gemini'].includes(value)) return json({ok:false,error:'模型供应商无效'},400);
+            if(name==='ANTHROPIC_MODEL' && !/^claude-[a-z0-9-]+$/.test(value)) return json({ok:false,error:'Claude模型名格式有误'},400);
+            if(name==='APINEBULA_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'ApiNebula模型名格式有误'},400);
             config[name]=value;
           }
         }
@@ -86,6 +150,15 @@ export class TradeDesk {
         return new Response(null,{status:303,headers:{...HEADERS,Location:'/admin'}});
       }
       if(path==='/admin/x/connect' && request.method==='POST') return this.connect(url,env);
+      if(path==='/admin/draft/run' && request.method==='POST') {
+        if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
+        return this.makeDraft(Number(env.TELEGRAM_OWNER_ID),env,true);
+      }
+      if(path==='/admin/draft/status' && request.method==='GET') {
+        const draft=await this.ctx.storage.get('draft:'+beijingDay());
+        return json(draft?{ok:true,status:draft.status,model:draft.model||null,
+          http_status:draft.http_status||null,detail:draft.detail||null}:{ok:true,status:'missing'});
+      }
       if(path==='/admin/gemini/check' && request.method==='POST') {
         if(!env.GEMINI_API_KEY) return page('请先保存Gemini密钥','<a href="/admin">返回后台</a>',409);
         const result=await provider('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',{
@@ -94,6 +167,36 @@ export class TradeDesk {
           m.supportedGenerationMethods?.includes('generateContent'));
         return page(available?'Gemini密钥检查通过':'当前密钥未找到预设模型',
           `<p>${available?'已确认可访问模型列表；实际免费生成额度仍以首次运行验证为准。':'请检查Google AI Studio的可用模型和地区。'}</p><p><a href="/admin">返回后台</a></p>`,available?200:409);
+      }
+      if(path==='/admin/anthropic/check' && request.method==='POST') {
+        if(!env.ANTHROPIC_API_KEY) return page('请先保存Claude API密钥','<a href="/admin">返回后台</a>',409);
+        const model=env.ANTHROPIC_MODEL||'claude-sonnet-5';
+        let result;
+        try {
+          result=await provider(`https://api.anthropic.com/v1/models/${encodeURIComponent(model)}`,{
+            headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01'}});
+        } catch(error) {
+          const failure=anthropicFailure(error);
+          return page('Claude连接检查未通过',`<p>${escapeHTML(failure.reason)}</p><p>状态码：<code>HTTP ${failure.status}</code></p><p>模型：<code>${escapeHTML(model)}</code></p><p><a href="/admin">返回后台</a></p>`,409);
+        }
+        const available=result.id===model;
+        return page(available?'Claude连接检查通过':'Claude模型不可用',
+          `<p>${available?`已确认API密钥可以访问 ${escapeHTML(model)}；本次检查没有生成正文。`:'请检查API额度、地区权限和模型名。'}</p><p><a href="/admin">返回后台</a></p>`,available?200:409);
+      }
+      if(path==='/admin/apinebula/check' && request.method==='POST') {
+        if(!env.APINEBULA_API_KEY) return page('请先保存ApiNebula令牌','<a href="/admin">返回后台</a>',409);
+        const model=env.APINEBULA_MODEL||'claude-sonnet-5';
+        try {
+          const result=await provider('https://apinebula.ai/v1/chat/completions',{
+            method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,
+              'Content-Type':'application/json'},
+            body:JSON.stringify({model,max_tokens:8,messages:[{role:'user',content:'Reply OK'}]})});
+          if(!result.id && !result.choices) throw Error('响应格式不兼容');
+        } catch(error) {
+          const failure=apiNebulaFailure(error);
+          return page('ApiNebula连接检查未通过',`<p>${escapeHTML(failure.reason)}</p><p>状态码：<code>HTTP ${failure.status}</code></p><p>模型：<code>${escapeHTML(model)}</code></p>${failure.detail?`<p>平台返回：<code>${escapeHTML(failure.detail)}</code></p>`:''}<p><a href="/admin">返回后台</a></p>`,409);
+        }
+        return page('ApiNebula连接检查通过',`<p>已确认令牌、OpenAI兼容文本接口和Claude模型可以调用。</p><p>模型：<code>${escapeHTML(model)}</code></p><p>本次最多生成8个token。</p><p><a href="/admin">返回后台</a></p>`);
       }
       if(path==='/admin/telegram/connect' && request.method==='POST') {
         if(!env.TELEGRAM_WEBHOOK_SECRET) return json({ok:false,error:'缺少Webhook密钥'},409);
@@ -110,9 +213,16 @@ export class TradeDesk {
     const ready=Boolean(env.X_CLIENT_ID && env.X_CLIENT_SECRET && env.TOKEN_ENCRYPTION_KEY);
     const fields=[['X_CLIENT_ID','X Client ID','text'],['X_CLIENT_SECRET','X Client Secret','password'],
       ['TELEGRAM_BOT_TOKEN','Telegram Bot Token','password'],['TELEGRAM_OWNER_ID','Telegram审核人ID（接通机器人后获取）','text'],
-      ['GEMINI_API_KEY','Gemini API Key（你已有的免费API密钥）','password']]
+      ['GEMINI_API_KEY','Gemini API Key（备用）','password'],
+      ['ANTHROPIC_API_KEY','Claude官方 API Key','password'],
+      ['ANTHROPIC_MODEL','Claude官方模型名（默认 claude-sonnet-5）','text'],
+      ['APINEBULA_API_KEY','ApiNebula API令牌','password'],
+      ['APINEBULA_MODEL','ApiNebula模型名（按模型广场填写）','text']]
       .map(([name,label,type])=>`<p><label>${label}<br><input style="width:95%;font:inherit;padding:8px" name="${name}" type="${type}" autocomplete="off" placeholder="${env[name]?'已保存；留空保持':'待填写'}"></label></p>`).join('');
-    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
+    const selected=env.AI_PROVIDER||'anthropic';
+    const providerName={anthropic:'Claude官方',apinebula:'ApiNebula',gemini:'Gemini'}[selected];
+    const providerField=`<p><label>首选撰稿模型<br><select style="width:98%;font:inherit;padding:8px" name="AI_PROVIDER"><option value="apinebula" ${selected==='apinebula'?'selected':''}>ApiNebula（Claude兼容）</option><option value="anthropic" ${selected==='anthropic'?'selected':''}>Claude官方</option><option value="gemini" ${selected==='gemini'?'selected':''}>Gemini</option></select></label></p>`;
+    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||'claude-sonnet-5')}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||'claude-sonnet-5')}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
   }
   async connect(url,env) {
     if(!env.X_CLIENT_ID || !env.X_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY)
@@ -154,6 +264,7 @@ export class TradeDesk {
       {'Set-Cookie':'desk_oauth=; HttpOnly; Secure; SameSite=Lax; Path=/oauth/x; Max-Age=0'});
   }
   async inbox(update,env) {
+    if(update.callback_query) return this.callbackQuery(update.callback_query,env);
     const m=update.message;
     if(!m || m.chat?.type!=='private' || m.from?.is_bot) return json({ok:true});
     const actor=String(m.from.id),chat=m.chat.id,text=(m.text||'').trim();
@@ -164,9 +275,15 @@ export class TradeDesk {
     }
     if(actor!==String(env.TELEGRAM_OWNER_ID)) return json({ok:true});
     if(text==='/start') {
-      await reply('先发送 /hotspots，再粘贴今日Grok热点（可分多条），最后发送 /done。提交热点不会批准发推。');
+      await reply('发送 /hotspots 后粘贴今日Grok热点（可分多条），最后发送 /done。系统会调用Claude生成送审稿，但不会自动发推。');
       return json({ok:true});
     }
+    if(text==='/status') {
+      const day=beijingDay(),draft=await this.ctx.storage.get('draft:'+day);
+      await reply(draft?`今日送审稿状态：${draft.status}；模型：${draft.model}`:'今天还没有送审稿。');
+      return json({ok:true});
+    }
+    if(text==='/draft') return this.makeDraft(chat,env);
     let response;
     await this.ctx.storage.transaction(async tx=>{
       if(await tx.get('tg-update:'+update.update_id)) return;
@@ -184,7 +301,7 @@ export class TradeDesk {
         if(!working.parts.length) {response='还没有收到热点正文。';return;}
         await tx.put('hotspots:'+day,{...working,submitted:Date.now()});
         await tx.delete(key);
-        response='今日热点已保存。撰稿与发布尚未启用，收到素材不会直接发推。';return;
+        response='今日热点已保存，正在生成送审稿。';return;
       }
       if(!text) {response='当前请粘贴文字；文件接收稍后接入。';return;}
       if(text.startsWith('/')) {response='可用命令：/hotspots、/done、/cancel。';return;}
@@ -193,6 +310,62 @@ export class TradeDesk {
       response=`已收到第${working.parts.length}段；发完请发送 /done。`;
     });
     if(response) await reply(response);
+    if(text==='/done' && response==='今日热点已保存，正在生成送审稿。') await this.makeDraft(chat,env);
+    return json({ok:true});
+  }
+  async makeDraft(chat,env,force=false) {
+    const day=beijingDay(),saved=await this.ctx.storage.get('hotspots:'+day);
+    if(!saved?.parts?.length) {
+      await telegram(env,'sendMessage',{chat_id:chat,text:'今天还没有热点。请先发送 /hotspots，粘贴内容后发送 /done。'});
+      return json({ok:true});
+    }
+    const existing=await this.ctx.storage.get('draft:'+day);
+    if(existing?.status==='generating' && !force) {
+      await telegram(env,'sendMessage',{chat_id:chat,text:'今日送审稿正在生成，请稍候。'});
+      return json({ok:true});
+    }
+    await this.ctx.storage.put('draft:'+day,{status:'generating',started:Date.now()});
+    try {
+      const snapshot=await this.ctx.storage.get('snapshot:'+day);
+      const verified=snapshot?`\n\n已通过程序新鲜度校验的当日交易快照：\n${JSON.stringify({
+        report:snapshot.report,summary:snapshot.summary,four_lines:snapshot.four_lines||''})}`:
+        '\n\n当日交易快照：尚未上传。禁止生成交易动作。';
+      const generated=await apiNebulaDraft(env,saved.parts.join('\n\n')+verified);
+      const draft={...generated,status:'pending_text_review',created:Date.now(),day};
+      await this.ctx.storage.put('draft:'+day,draft);
+      await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}\n\n——\n状态：等待文字审核｜模型：${draft.model}`,
+        reply_markup:{inline_keyboard:[[
+          {text:'✅ 文字通过',callback_data:`text_ok:${day}`},
+          {text:'↩️ 退回重写',callback_data:`text_reject:${day}`}
+        ]]}});
+    } catch(error) {
+      const failure=apiNebulaFailure(error);
+      await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),
+        model:env.APINEBULA_MODEL||'claude-sonnet-5-5',http_status:failure.status,detail:failure.detail||failure.reason});
+      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.detail||failure.reason}（HTTP ${failure.status}）`});
+    }
+    return json({ok:true});
+  }
+  async callbackQuery(query,env) {
+    const actor=String(query.from?.id||''),chat=query.message?.chat?.id;
+    if(!env.TELEGRAM_OWNER_ID || actor!==String(env.TELEGRAM_OWNER_ID) || !chat) return json({ok:true});
+    const [action,day]=String(query.data||'').split(':');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(day||'')) return json({ok:true});
+    const draft=await this.ctx.storage.get('draft:'+day);
+    if(!draft) return json({ok:true});
+    if(action==='text_ok' && draft.status==='pending_text_review') {
+      draft.status='text_approved';draft.approved=Date.now();
+      await this.ctx.storage.put('draft:'+day,draft);
+      await telegram(env,'answerCallbackQuery',{callback_query_id:query.id,text:'文字稿已通过'});
+      await telegram(env,'sendMessage',{chat_id:chat,text:'文字稿已通过。海报和正式中英文稿生成尚未启用，不会发推。'});
+    } else if(action==='text_reject' && draft.status==='pending_text_review') {
+      draft.status='text_rejected';draft.rejected=Date.now();
+      await this.ctx.storage.put('draft:'+day,draft);
+      await telegram(env,'answerCallbackQuery',{callback_query_id:query.id,text:'已退回'});
+      await telegram(env,'sendMessage',{chat_id:chat,text:'已退回。发送修改要求后再发送 /draft；当前版本不会发推。'});
+    } else {
+      await telegram(env,'answerCallbackQuery',{callback_query_id:query.id,text:'该稿件已经处理'});
+    }
     return json({ok:true});
   }
 }
