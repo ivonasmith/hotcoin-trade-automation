@@ -52,6 +52,6 @@ test('自检：超长、新单缺盈亏比和有效期、盈亏比算错都会�
   assert.deepEqual(ok,[]);
 });
 test('提示词固定了强制句后的关系句，并禁止把费率当方向理由',()=>{
-  for(const phrase of ['我这张单先定好最多亏多少，再倒推仓位。','硬上限500字','只作温度描述','回代验算'])
+  for(const phrase of ['我这张单先定好最多亏多少，再倒推仓位。','硬上限500字','只作温度描述','程序已定的交易决定'])
     assert.equal(DRAFT_SYSTEM.includes(phrase),true,phrase);
 });

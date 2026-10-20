@@ -1,0 +1,174 @@
+// Program-side trade decision. The drafting model never computes or chooses order numbers or the
+// "may we open a new order today" verdict: this module reads the snapshot's 做空筛选 / L1 discount
+// results (already computed by the collection scripts per 《操作规格》v6.5 §08) and produces one
+// canonical order plus the reasons when there is none. The model only writes it up.
+const CORE=['BTC','ETH','SOL','XRP','BNB'];
+const BASE_USD=2000;
+const VALID_DAYS=15;
+const PRICE_TOLERANCE=0.0001; // 0.01% between sources before we call it a conflict
+
+const num=value=>typeof value==='number' && Number.isFinite(value)?value:null;
+
+export function fmtPrice(value) {
+  const n=Number(value);
+  if(!Number.isFinite(n)) return String(value);
+  if(n>=1000) return n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(n>=1) return String(Number(n.toFixed(4)));
+  return String(Number(n.toPrecision(4)));
+}
+export function fmtPct(value) {
+  const n=Number(value);
+  return `${n>=0?'+':'-'}${Math.abs(n).toFixed(2)}%`;
+}
+function fmtSize(multiple) {
+  return `${(Math.round(multiple*100)/100).toFixed(2)}仓`;
+}
+export function expiryText(day,days=VALID_DAYS) {
+  const date=new Date(Date.parse(day+'T00:00:00Z')+days*86400000);
+  return `${date.getUTCMonth()+1}月${date.getUTCDate()}日`;
+}
+
+// Why a core coin produced no candidate, in plain words, from the gate fields the screen records.
+function whyNoCandidate(symbol,screen) {
+  if(!screen) return `$${symbol}：筛选结果缺失`;
+  const gate1=String(screen['门①']||''),gate2=String(screen['门②']||'');
+  if(gate1.startsWith('未过')) return `$${symbol}：${gate1.replace('未过：','')}`;
+  if(gate1.includes('数据不足')) return `$${symbol}：阶段数据不足，算不出能否做空`;
+  if(gate2.startsWith('撞上')) return `$${symbol}：${gate2.replace('撞上反模式：','反模式：')}`;
+  if(screen['费率否决']) return `$${symbol}：${screen['门③路径']||'费率条件否决'}`;
+  if(typeof screen['门③需要人工核实']==='string' && screen['门③需要人工核实']) return `$${symbol}：${screen['门③需要人工核实']}`;
+  return `$${symbol}：上方没有够格的压力位`;
+}
+
+export function buildOrderPlan(snapshot,day) {
+  const summary=snapshot?.summary;
+  const plan={allowed:false,order:null,reasons:[],human_checks:[],notes:[],day};
+  const humanChecks=[
+    '台账未接入程序：请核对熔断状态、已挂单是否不超过5张、同方向主流币是否不超过3个',
+    '日线收盘口径：止损与作废条件以收盘价判断，请确认今日日线尚未收盘'
+  ];
+  if(!summary || typeof summary!=='object') {
+    plan.reasons.push('当日交易快照缺失，不开新单');
+    return plan;
+  }
+  const screens=summary['做空筛选'];
+  if(!screens || typeof screens!=='object') {
+    plan.reasons.push('快照里没有做空筛选结果，不开新单');
+    return plan;
+  }
+  const discount=summary['L1L4']?.['L1折扣判定'];
+  if(!discount || discount['数据完整']!==true) {
+    plan.reasons.push('宏观层读数不全，折扣条件判定不了，不能按“未触发”处理，不开新单');
+    plan.human_checks.push('宏观层读数不全，需补齐后再判断');
+    return plan;
+  }
+  const multiplier=num(discount['新开仓倍数'])??1;
+  if(discount['不加仓']) plan.notes.push('实际利率急升但附加条件未配齐：已有仓位不加仓');
+  if((discount['边缘提示']||[]).length) plan.notes.push('折扣条件边缘触发：'+discount['边缘提示'].join('；'));
+
+  const metrics=summary['指标']||{};
+  const eligible=[];
+  for(const symbol of Object.keys(screens)) {
+    const screen=screens[symbol];
+    const candidates=Array.isArray(screen?.['候选'])?screen['候选']:[];
+    if(!candidates.length) {
+      if(CORE.includes(symbol)) plan.reasons.push(whyNoCandidate(symbol,screen));
+      continue;
+    }
+    if(screen['费率否决']) {
+      plan.reasons.push(whyNoCandidate(symbol,screen));
+      continue;
+    }
+    if(typeof screen['门③需要人工核实']==='string' && screen['门③需要人工核实']) {
+      plan.reasons.push(`$${symbol}：${screen['门③需要人工核实']}`);
+      continue;
+    }
+    if(!CORE.includes(symbol)) {
+      plan.human_checks.push(`$${symbol} 过了筛选但不是主流币，需先完成迷因币/小币裁决，程序不出单`);
+      continue;
+    }
+    const first=candidates.find(item=>num(item['进场']) && num(item['止损']) && num(item['目标']));
+    if(first) eligible.push({symbol,screen,candidate:first});
+  }
+  if(!eligible.length) {
+    if(!plan.reasons.length) plan.reasons.push('今天没有币种同时过门①②③并有压力位候选');
+    return plan;
+  }
+  // One new order per post: main coins in fixed order, then the nearest level.
+  eligible.sort((a,b)=>CORE.indexOf(a.symbol)-CORE.indexOf(b.symbol)
+    ||Math.abs(a.candidate['距现价%']??1e9)-Math.abs(b.candidate['距现价%']??1e9));
+  const {symbol,screen,candidate}=eligible[0];
+  const entry=candidate['进场'],stop=candidate['止损'],target=candidate['目标'];
+  if(!(stop>entry && target<entry)) {
+    plan.reasons.push(`$${symbol}：筛选给出的止损/目标方向不对（做空止损应高于进场、目标应低于进场），不出单`);
+    return plan;
+  }
+  const price=num(metrics[symbol]?.price)??num(screen['现价']);
+  const otherPrice=num(screen['现价']);
+  if(price && otherPrice && Math.abs(price/otherPrice-1)>PRICE_TOLERANCE)
+    plan.notes.push(`$${symbol}现价两个来源不一致：指标 ${fmtPrice(price)}，做空筛选 ${fmtPrice(otherPrice)}；正文不写现价`);
+  const dist=num(candidate['距现价%']);
+  if(price && dist!==null) {
+    const recomputed=(entry/price-1)*100;
+    if(Math.abs(recomputed-dist)>0.1)
+      plan.notes.push(`距现价${fmtPct(dist)}与按现价 ${fmtPrice(price)} 重算的${fmtPct(recomputed)}不一致，以筛选值为准，请核对`);
+  }
+  const ratio=(entry-target)/(stop-entry);
+  const direction=num(candidate['方向倍数'])??0.5;
+  const level=num(candidate['仓位倍数'])??1;
+  const size=direction*level*multiplier;
+  plan.order={
+    symbol,side:'空',entry,stop,target,
+    dist_pct:dist,
+    stop_pct:(stop/entry-1)*100,
+    ratio,ratio_text:`1:${Math.round(ratio*10)/10}`,
+    size,size_text:fmtSize(size),amount_usd:Math.round(BASE_USD*size),
+    expires:expiryText(day),
+    discount_multiplier:multiplier,
+    touched_recent:Boolean(candidate['15天内碰过']),
+    path:screen['门③路径']||null,
+    funding_7d:num(screen['费率7日均']),funding_30d:num(screen['费率30日均'])
+  };
+  plan.allowed=true;
+  if(plan.order.touched_recent) plan.notes.push('这个价位15天内被碰过，仓位已按程序打折');
+  if(multiplier<1) plan.notes.push('宏观层折扣已触发，仓位已按程序打折');
+  plan.human_checks.unshift(...humanChecks);
+  const dropped=eligible.slice(1).map(item=>'$'+item.symbol);
+  if(dropped.length) plan.notes.push(`${dropped.join('、')}也过了筛选，本帖只写一张单，需要时请另行安排`);
+  return plan;
+}
+
+// The block that goes into the drafting prompt.
+export function orderBlock(plan) {
+  const lines=['程序已定的交易决定（由程序按规格计算，你不得更改、取整、换算或另选价位）：'];
+  if(plan.allowed) {
+    const o=plan.order;
+    lines.push('结论：今天可以开这一张新单。');
+    lines.push(`新单：$${o.symbol} ${o.side}单｜进场限价 ${fmtPrice(o.entry)}｜距现价 ${o.dist_pct===null?'待补':fmtPct(o.dist_pct)}｜止损 ${fmtPrice(o.stop)}（按日线收盘判断）｜目标 ${fmtPrice(o.target)}｜盈亏比 ${o.ratio_text}｜仓位 ${o.size_text}｜有效期到 ${o.expires}`);
+    lines.push('正文只写这一张单，上面每一项原样写入，不得增加其他新单。');
+  } else {
+    lines.push('结论：今天不开新单。正文必须明确写“今天不开新单”，严禁出现任何限价、止损价、目标价、盈亏比、仓位或有效期。');
+  }
+  if(plan.reasons.length) lines.push('不出单的原因（正文用人话简述一两条，别列清单）：\n'+plan.reasons.map(item=>'- '+item).join('\n'));
+  const notes=[...plan.notes,...plan.human_checks];
+  if(notes.length) lines.push('必须写进送审备注的事项：\n'+notes.map(item=>'- '+item).join('\n'));
+  return lines.join('\n');
+}
+
+// Reviewer-facing warnings when the draft disagrees with the program's decision.
+export function checkAgainstPlan(content,plan) {
+  const body=String(content).split('送审备注：')[0].replace(/^\s*审核正文：/,'');
+  const warnings=[];
+  if(!plan.allowed) {
+    if(/限价|盈亏比|有效期到|止损\s*[0-9]/.test(body)) warnings.push('程序判定今天不开新单，但正文出现了订单内容');
+    return warnings;
+  }
+  const o=plan.order;
+  const expected=[['进场限价',fmtPrice(o.entry)],['止损',fmtPrice(o.stop)],['目标',fmtPrice(o.target)],
+    ['盈亏比',o.ratio_text],['仓位',o.size_text],['有效期',o.expires]];
+  if(o.dist_pct!==null) expected.push(['距现价',fmtPct(o.dist_pct)]);
+  const normalized=body.replace(/\s/g,'');
+  const missing=expected.filter(([,value])=>!normalized.includes(value.replace(/\s/g,''))).map(([label,value])=>`${label} ${value}`);
+  if(missing.length) warnings.push(`新单数字与程序计算不一致或缺失：${missing.join('、')}`);
+  return warnings;
+}

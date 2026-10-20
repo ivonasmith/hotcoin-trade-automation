@@ -1,3 +1,4 @@
+import {checkAgainstPlan} from './order.mjs';
 // Drafting prompt plus two deterministic safety nets (ticker $ prefix, format lint).
 // Standards come from the published 《热币发帖风格标准》 and 《操作规格》 sections 02 / 09.
 // The prompt states what "good" looks like, not only what is banned.
@@ -7,7 +8,7 @@ export const DRAFT_SYSTEM=`你是“链上大叔｜热币分析”的送审稿�
 一、交易闸门（硬规则，违反就整篇重写）
 - 没有交易数据、台账快照、L1-L4或P0-P3结论时，严禁提出新单、撤单、价位、仓位或止损，并在送审备注里列出缺口。
 - 迷因币裁决未完成，不得提出迷因币新单。旧单不复活。
-- 新单的限价、距现价%、止损、目标、盈亏比、仓位、有效期必须原样取自快照，不得自己换算、取整或改口径；快照里没有的项不写，记进送审备注。
+- 今天能不能开新单、开哪一张、限价、距现价%、止损、目标、盈亏比、仓位、有效期，全部由用户消息里的“程序已定的交易决定”给出。你只负责写，不得更改、取整、换算、另选价位，也不得自己判断“可以开”或“不开”。程序写“今天不开新单”，正文就只能写今天不开新单。
 - 来自热点摘要、未核实的数字，正文里在数字后标“（据报道）”，并在送审备注里逐条列为待核实。
 
 二、写法标准（照第六节样例的语感写）
@@ -22,7 +23,7 @@ export const DRAFT_SYSTEM=`你是“链上大叔｜热币分析”的送审稿�
 9. 正文硬上限500字（不含空格），超了就砍。先砍的内容：资金费率、ETF 等细节数字，对结论没用的机制推测，已经写过的意思。必留：主线判断、新单数字、一句理由、风险和三个动作、强制句、前瞻。
 10. 资金费率、持仓量、情绪指数、恐慌贪婪只作温度描述（“费率还是正的”），不得当作涨跌方向的理由，也不要写“多头付费所以会下跌”这类推论。
 11. 不写素材里没有的因果机制和数字，例如资金到账时间、谁在接盘、“近一个月最大”。热点只转述争点，不替它补解释。
-12. 新单写全：限价、距现价%、止损、目标、盈亏比、仓位、有效期。盈亏比快照有就直接用；快照没有，做空按（进场−目标）÷（止损−进场）、做多按（目标−进场）÷（进场−止损）算，写成1:N，算完用三个价位回代验算一遍。仓位和有效期快照没有就写“待补”，并记进送审备注。距现价%只能用快照给的值；现价有多个口径时，在送审备注里说明它对应哪一个。
+12. 有新单时，把程序给的限价、距现价%、止损、目标、盈亏比、仓位、有效期一项不漏、原样写成一块，不自己算任何一项；程序列出的“必须写进送审备注的事项”逐条放进送审备注。现价有多个口径时，正文不写现价。
 
 三、格式标准（读者看得到的文字都要达标）
 - 币种：每个币第一次出现都写成 $ 加大写代码，如 $BTC、$ETH、$ZRO。ETF、CPI、RSI、MA200 这类不是币的缩写不加 $。
@@ -96,7 +97,7 @@ const INTERNAL_WORDS=['位置年龄','回踩间隔','净期望','期望值','回
 const NUMERAL_OK=new Set(['万一','千万']);
 
 // Deterministic checks on the reader-facing section only. Returns short Chinese warnings for the reviewer.
-export function lintDraft(content) {
+export function lintDraft(content,plan=null) {
   const body=String(content).split('送审备注：')[0].replace(/^\s*审核正文：/,'');
   const warnings=[];
   const numerals=[...new Set([...body.matchAll(/[零〇一二三四五六七八九十百千万亿]{2,}/g)].map(m=>m[0])
@@ -119,5 +120,6 @@ export function lintDraft(content) {
         warnings.push(`盈亏比写的是1:${stated[1]}，按三个价位算是1:${(reward/risk).toFixed(1)}`);
     }
   }
+  if(plan) warnings.push(...checkAgainstPlan(content,plan));
   return warnings;
 }

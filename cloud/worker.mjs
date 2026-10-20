@@ -1,5 +1,6 @@
 import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
+import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
 
@@ -411,12 +412,13 @@ export class TradeDesk {
       const verified=compact?`\n\n已通过程序新鲜度校验的当日交易快照${compact.trimmed?`（体积已压缩：长列表只保留前${compact.items}项，被省略的内容不得推测）`:''}：\n${compact.body}`:
         '\n\n当日交易快照：尚未上传。禁止生成交易动作。';
       const hotspots=saved.parts.join('\n\n');
+      const plan=buildOrderPlan(snapshot,day);
       which=draftProvider(env);
-      const generated=await generateDraft(env,hotspots+verified,which);
+      const generated=await generateDraft(env,hotspots+verified+'\n\n'+orderBlock(plan),which);
       // Deterministic safety nets: $ prefix on coins, and a format check the reviewer can see.
       const content=normalizeTickers(generated.content,collectTickers(snapshot,hotspots));
-      const lint=lintDraft(content);
-      const draft={...generated,content,lint,status:'pending_text_review',created:Date.now(),day};
+      const lint=lintDraft(content,plan);
+      const draft={...generated,content,lint,order:plan.order,order_allowed:plan.allowed,status:'pending_text_review',created:Date.now(),day};
       await this.ctx.storage.put('draft:'+day,draft);
       const warning=lint.length?`\n\n⚠ 格式自检：${lint.join('；')}。可点“退回重写”。`:'';
       await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}${warning}\n\n——\n状态：等待文字审核｜模型：${draft.model}`,
