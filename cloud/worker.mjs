@@ -1,5 +1,6 @@
 import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
+import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
 
 const SCOPES='tweet.read tweet.write users.read media.write offline.access';
@@ -94,10 +95,6 @@ async function telegram(env,method,payload) {
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 }
-const DRAFT_SYSTEM=`你是“链上大叔｜热币分析”的送审稿编辑。只根据用户提供的已核实素材写，不计算、不猜测、不补数字。
-写作规则：第一句先说当天动作或没有动作，再解释原因；第一人称；短句和自然口语；不要【】、报告式小标题、编号列表或箭头；热点只写大家在争什么以及为什么不足以直接开单；中文正文约200至500字。
-交易规则：没有交易数据、台账快照、L1-L4或P0-P3结论时，严禁提出新单、撤单、价位、仓位或止损；必须在送审备注中列出缺口。未经核实的新闻数字只能写“据热点摘要，待核实”。迷因币裁决未完成，不得提出迷因币新单。旧单不复活。
-输出严格分两段：第一段以“审核正文：”开头，给可读的中文草稿；第二段以“送审备注：”开头，说明数据缺口、未核实信息和是否允许进入正式帖子。不要输出英文版或海报文案。`;
 async function apiNebulaDraft(env,hotspots) {
   if(!env.APINEBULA_API_KEY) throw Error('未配置ApiNebula');
   const model=env.APINEBULA_MODEL||'claude-sonnet-5-5';
@@ -376,10 +373,15 @@ export class TradeDesk {
       promptChars=compact?.chars||0;
       const verified=compact?`\n\n已通过程序新鲜度校验的当日交易快照${compact.trimmed?`（体积已压缩：长列表只保留前${compact.items}项，被省略的内容不得推测）`:''}：\n${compact.body}`:
         '\n\n当日交易快照：尚未上传。禁止生成交易动作。';
-      const generated=await apiNebulaDraft(env,saved.parts.join('\n\n')+verified);
-      const draft={...generated,status:'pending_text_review',created:Date.now(),day};
+      const hotspots=saved.parts.join('\n\n');
+      const generated=await apiNebulaDraft(env,hotspots+verified);
+      // Deterministic safety nets: $ prefix on coins, and a format check the reviewer can see.
+      const content=normalizeTickers(generated.content,collectTickers(snapshot,hotspots));
+      const lint=lintDraft(content);
+      const draft={...generated,content,lint,status:'pending_text_review',created:Date.now(),day};
       await this.ctx.storage.put('draft:'+day,draft);
-      await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}\n\n——\n状态：等待文字审核｜模型：${draft.model}`,
+      const warning=lint.length?`\n\n⚠ 格式自检：${lint.join('；')}。可点“退回重写”。`:'';
+      await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}${warning}\n\n——\n状态：等待文字审核｜模型：${draft.model}`,
         reply_markup:{inline_keyboard:[[
           {text:'✅ 文字通过',callback_data:`text_ok:${day}`},
           {text:'↩️ 退回重写',callback_data:`text_reject:${day}`}

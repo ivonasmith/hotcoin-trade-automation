@@ -298,3 +298,20 @@ test('401这类配置错误不重试，直接提示令牌问题',async()=>{
     assert.equal(calls.telegram.at(-1).text.includes('令牌'),true);
   } finally {restore();}
 });
+test('模型漏写$时由程序补上，汉字数字在Telegram消息里被提示',async()=>{
+  const draftText='审核正文：今天我只挂一张很小的 BTC 空单，挂在八万二千三附近。ETH 跌得比 BTC 多。ZRO 今天解锁。\n\n送审备注：可发。';
+  const {desk,entries,calls,day,restore}=draftSetup(()=>Response.json({choices:[{message:{content:draftText}}]}));
+  entries.set('hotspots:'+day,{day,parts:['ZRO今天解锁约2,360万枚'],submitted:Date.now()});
+  entries.set('snapshot:'+day,{report:{ok:true,finished_at:new Date().toISOString()},
+    summary:{'指标':{BTC:{price:1},ETH:{price:1}}},four_lines:'L1：偏多',received_at:Date.now()});
+  try {
+    await desk.makeDraft(123,desk.env);
+    const message=calls.telegram.at(-1).text;
+    assert.equal(message.includes('一张很小的 $BTC 空单'),true);
+    assert.equal(message.includes('$ETH 跌得比 BTC'),true);
+    assert.equal(message.includes('$ZRO 今天解锁'),true);
+    assert.equal(message.includes('⚠ 格式自检'),true);
+    assert.equal(message.includes('八万二千三'),true);
+    assert.equal(entries.get('draft:'+day).content.includes('$BTC'),true);
+  } finally {restore();}
+});
