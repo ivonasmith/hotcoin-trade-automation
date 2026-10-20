@@ -15,10 +15,17 @@ export function splitDraft(content) {
 // The opening line announces issue number and date; the program adds it because the program owns the issue number.
 export const postHeader=(lang,issue,day)=>lang==='zh'?`【热币分析·第${issue}期（${day}）】`:`【Hot Coin Desk · Issue ${issue} (${day})】`;
 export function formalChinese(body,tradeLogUrl,header='') {
-  return `${header?header+'\n':''}${body.trim()}\n\n交易记录：${tradeLogUrl}`;
+  return limitCashtags(`${header?header+'\n':''}${body.trim()}\n\n交易记录：${tradeLogUrl}`);
 }
 export function formalEnglish(text,tradeLogUrl,header='') {
-  return `${header?header+'\n':''}${text.trim()}\n\nTrade log: ${tradeLogUrl}`;
+  return limitCashtags(`${header?header+'\n':''}${text.trim()}\n\nTrade log: ${tradeLogUrl}`);
+}
+
+// X rejects posts with more than one cashtag ($SYMBOL). Keep the first one as a cashtag; the rest stay as plain tickers.
+// Dollar amounts like "$527 million" are untouched (a cashtag starts with a letter).
+export function limitCashtags(text) {
+  let seen=false;
+  return String(text).replace(/\$([A-Za-z][A-Za-z0-9]{1,9})\b/g,(match,symbol)=>{ if(!seen) { seen=true; return match; } return symbol; });
 }
 
 // A reviewer approved this body; before it becomes the only source, confirm it still matches the program's order.

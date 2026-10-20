@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Flow,GRACE_MS,WATCHDOG_MS} from '../cloud/flow.mjs';
-import {numberTokens,numberDiff,englishProblems,issueNumber,splitDraft,ledgerPayload,posterPayload,bodyProblems,posterNames}
+import {limitCashtags,numberTokens,numberDiff,englishProblems,issueNumber,splitDraft,ledgerPayload,posterPayload,bodyProblems,posterNames}
   from '../cloud/formal.mjs';
 import {seal} from '../cloud/security.mjs';
 import {dueAt} from '../calendar.mjs';
@@ -393,12 +393,11 @@ test('发推失败：图片已上传但发推未确认，标记未知，绝不�
   const h=await liveHarness({provider:async(url,options)=>{
     if(url.includes('/users/me?')) return {data:{subscription_type:'premium'}};
     if(url.endsWith('/media/upload')) return {data:{id:'m'}};
-    const error=Error('服务请求失败（HTTP 403）');error.status=403;error.providerMessage='Your account is suspended';throw error;}});
+    throw Error('请求超时');}});
   await h.flow.alarm();
   const slot=(await h.flow.getFlow(DAY)).slots.zh;
   assert.equal(slot.status,'unknown');
   assert.match(texts(h).at(-1),/可能已经送达X/);
-  assert.match(texts(h).at(-1),/HTTP 403：Your account is suspended/);
   const before=h.log.x.length;
   await h.flow.alarm();
   assert.equal(h.log.x.length,before,'再次触发不会重发');
@@ -499,4 +498,40 @@ test('终审通过后记下今天的期号；明天没新单也接着数；/reis
   assert.equal((await h.flow.s.get('slots-open')||[]).includes(DAY),false);
   await h.flow.s.put('flow:'+DAY,{...again,status:'final_approved',slots:{zh:{due:1,status:'posted'},en:{due:2,status:'scheduled'}}});
   assert.equal(await h.flow.reissue(DAY),false,'已经开始发布的不能重来');
+});
+
+test('X只允许一个 $币种标签：保留第一个，其余去掉$，美元金额不动',()=>{
+  assert.equal(limitCashtags('只挂一张$SOL空单。美国现货$BTC ETF净流入5.266亿美元；$SOL继续跌；约$527 million'),
+    '只挂一张$SOL空单。美国现货BTC ETF净流入5.266亿美元；SOL继续跌；约$527 million');
+  assert.equal(limitCashtags('没有币种标签 $100'),'没有币种标签 $100');
+});
+test('X以4xx拒绝发帖：确定没发出去，标记失败而不是未知；/retrypost 只重发这一条，且去掉多余的$',async()=>{
+  let refuse=true;
+  const sent=[];
+  const h=await liveHarness({provider:async(url,options)=>{
+    if(url.includes('/users/me?')) return {data:{subscription_type:'premium'}};
+    if(url.endsWith('/media/upload')) return {data:{id:'m'}};
+    if(url.endsWith('/tweets')) {
+      if(refuse) { const error=Error('服务请求失败（HTTP 403）');error.status=403;error.providerMessage='Posts are limited to a maximum of one cashtag';throw error; }
+      sent.push(JSON.parse(options.body).text); return {data:{id:'tw'+sent.length}};
+    }
+    throw Error('unexpected '+url);}});
+  await h.flow.alarm();
+  h.state.now=dueAt(DAY,'en')+1000;
+  await h.flow.alarm();
+  const after=await h.flow.getFlow(DAY);
+  assert.equal(after.slots.zh.status,'failed');
+  assert.equal(after.slots.en.status,'failed');
+  assert.doesNotMatch(texts(h).at(-1),/可能已经送达X/);
+  assert.match(texts(h).join('\n'),/Posts are limited to a maximum of one cashtag/);
+  refuse=false;
+  assert.equal(await h.flow.retryPost(DAY),true);
+  const retried=await h.flow.getFlow(DAY);
+  assert.equal(retried.slots.zh.status,'posted');
+  assert.equal(retried.slots.en.status,'posted');
+  assert.equal(sent.length,2);
+  for(const text of sent) assert.ok((text.match(/\$[A-Za-z]/g)||[]).length<=1,'每条最多一个币种标签');
+  const count=sent.length;
+  assert.equal(await h.flow.retryPost(DAY),false,'已发布的不会再发');
+  assert.equal(sent.length,count);
 });

@@ -5,7 +5,7 @@
 // a double tap, a retried webhook or a re-delivered alarm can never repeat a step.
 import {beijingDay,eligible,dueAt} from '../calendar.mjs';
 import {splitDraft,formalChinese,formalEnglish,bodyProblems,TRANSLATE_SYSTEM,translatePrompt,englishProblems,
-  issueNumber,posterNames,posterPayload,ledgerPayload,postHeader} from './formal.mjs';
+  issueNumber,posterNames,posterPayload,ledgerPayload,postHeader,limitCashtags} from './formal.mjs';
 import {accessToken,checkPostLength,uploadImage,createPost,xErrorReason} from './x.mjs';
 
 export const GRACE_MS=60*60000;      // allow data/API/review delays; after 60 minutes it waits for the reviewer
@@ -371,7 +371,7 @@ export class Flow {
     const claimed=await this.slotCas(day,lang,late?['missed']:['scheduled'],{status:'publishing',claimed:this.now()});
     if(!claimed) return false;
     const flow=await this.getFlow(day);
-    const text=flow.formal[lang+'_post'];
+    const text=limitCashtags(flow.formal[lang+'_post']);
     const keys=[lang+'_desktop',lang+'_mobile'];
     const live=this.env.PUBLISH_ENABLED==='true';
     try {
@@ -397,7 +397,9 @@ export class Flow {
     } catch(error) {
       const slot=(await this.getFlow(day)).slots[lang];
       // If the post call itself may have gone through, never retry blindly.
-      const ambiguous=slot.media_ids && !slot.tweet_id;
+      // An HTTP 4xx from X means the post was refused, so it definitely did not go out; only timeouts/5xx are unknown.
+      const refused=error.status>=400 && error.status<500;
+      const ambiguous=slot.media_ids && !slot.tweet_id && !refused;
       const reason=xErrorReason(error);
       await this.slotCas(day,lang,['publishing'],{status:ambiguous?'unknown':'failed',error:reason.slice(0,1000)});
       await this.say(`第${flow.issue}期${LANG_NAME[lang]}版没有发布成功。X返回：${reason}。${ambiguous?'发布请求可能已经送达X，请先到账号主页确认，程序不会自动重发。':'程序不会自动重试，请处理后告诉我。'}`);
@@ -425,6 +427,21 @@ export class Flow {
     await this.arm();
     await this.startFormal(day);
     return true;
+  }
+  // Re-send a slot whose last attempt failed (or ended unknown and the reviewer checked X: nothing was posted).
+  async retryPost(day) {
+    const flow=await this.getFlow(day);
+    if(!flow || flow.status!=='final_approved') { await this.say('现在不能重发：今天的图片与正式稿还没有终审通过。'); return false; }
+    let fired=0;
+    for(const lang of LANGS) {
+      const slot=flow.slots?.[lang];
+      if(slot && ['failed','unknown'].includes(slot.status)) {
+        const reset=await this.slotCas(day,lang,['failed','unknown'],{status:'scheduled',retry_of:slot.error||slot.status,media_ids:null,error:null});
+        if(reset && await this.fire(day,lang)) fired++;
+      } else await this.say(`${LANG_NAME[lang]}版当前状态是 ${slot?.status||'没有排期'}，这次不重发。`);
+    }
+    await this.arm();
+    return fired>0;
   }
   // The reviewer asked for the post now instead of waiting for the scheduled time. Same at-most-once claim as the alarm.
   async postNow(day) {

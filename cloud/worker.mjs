@@ -516,6 +516,10 @@ export class TradeDesk {
       await this.flow(env).reissue(beijingDay());
       return json({ok:true});
     }
+    if(text==='/retrypost') {
+      await this.flow(env).retryPost(beijingDay());
+      return json({ok:true});
+    }
     if(text==='/postnow') {
       await this.flow(env).postNow(beijingDay());
       return json({ok:true});
