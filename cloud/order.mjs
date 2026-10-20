@@ -162,6 +162,8 @@ export function buildOrderPlan(snapshot,day) {
     expires:expiryText(day),
     discount_multiplier:multiplier,
     touched_recent:Boolean(candidate['15天内碰过']),
+    cancel_ma50:num(metrics[symbol]?.ma50),
+    r2:entry-2*(stop-entry),r3:entry-3*(stop-entry),
     path:screen['门③路径']||null,
     funding_7d:num(screen['费率7日均']),funding_30d:num(screen['费率30日均'])
   };
@@ -187,6 +189,8 @@ export function orderBlock(plan) {
     const o=plan.order;
     lines.push('结论：今天可以开这一张新单。');
     lines.push(`新单：$${o.symbol} ${o.side}单｜进场限价 ${fmtPrice(o.entry)}｜距现价 ${o.dist_pct===null?'待补':fmtPct(o.dist_pct)}｜止损 ${fmtPrice(o.stop)}（按日线收盘判断）｜目标 ${fmtPrice(o.target)}｜盈亏比 ${o.ratio_text}｜仓位 ${o.size_text}｜有效期到 ${o.expires}`);
+    lines.push(`作废与撤单条件（原样写，不增不减，不换成别的均线）：成交前日线收盘站上50日均线${o.cancel_ma50?'（目前约 '+fmtPrice(o.cancel_ma50)+'）':''}，这单作废；成交前价格先跌到目标 ${fmtPrice(o.target)}，这单作废；成交前资金费率年化转负，撤单。`);
+    lines.push(`成交后的止损处理（字数紧时压成一句，数字不改）：价格到 ${fmtPrice(o.r2)} 时，止损下移到进场价；到 ${fmtPrice(o.r3)} 时，止损跟随20日均线下移；止损只往盈利方向移，一律按日线收盘判断。`);
     lines.push('正文只写这一张单，上面每一项原样写入，不得增加其他新单。');
   } else {
     lines.push('结论：今天不开新单。正文必须明确写“今天不开新单”，严禁出现任何限价、止损价、目标价、盈亏比、仓位或有效期。');
@@ -211,6 +215,7 @@ export function checkAgainstPlan(content,plan) {
   const expected=[['进场限价',fmtPrice(o.entry)],['止损',fmtPrice(o.stop)],['目标',fmtPrice(o.target)],
     ['盈亏比',o.ratio_text],['仓位',o.size_text],['有效期',o.expires]];
   if(o.dist_pct!==null) expected.push(['距现价',fmtPct(o.dist_pct)]);
+  expected.push(['50日均线','50日均线']);
   const normalized=body.replace(/\s/g,'');
   const missing=expected.filter(([,value])=>!normalized.includes(value.replace(/\s/g,''))).map(([label,value])=>`${label} ${value}`);
   if(missing.length) warnings.push(`新单数字与程序计算不一致或缺失：${missing.join('、')}`);

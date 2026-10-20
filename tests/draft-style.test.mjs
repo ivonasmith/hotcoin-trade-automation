@@ -37,8 +37,8 @@ test('自检能抓到汉字数字、内部用词和模板格式，达标稿不�
   const good=lintDraft('审核正文：今天我挂一张$BTC空单。进场限价82,314，止损83,960，目标75,730，盈亏比1:4，有效期到10月31日。万一反弹，我两天内撤单；一张单而已。\n\n送审备注：二十分钟内可核对，八万这类字眼只在备注里不检查。');
   assert.deepEqual(good,[]);
 });
-test('提示词包含正面标准：阿拉伯数字、$前缀、强制句、送审备注达标标准，并保留交易闸门',()=>{
-  for(const phrase of ['严禁提出新单','1,234.56','$BTC','不写汉字数字','多数人在高波动币上亏钱不是看错方向','20秒','达标样例','旧单不复活','迷因币裁决未完成'])
+test('提示词包含正面标准：阿拉伯数字、$前缀、送审备注达标标准，并保留交易闸门',()=>{
+  for(const phrase of ['严禁提出新单','1,234.56','$BTC','不写汉字数字','20秒','达标样例','旧单不复活','迷因币裁决未完成'])
     assert.equal(DRAFT_SYSTEM.includes(phrase),true,phrase);
 });
 test('自检：超长、新单缺盈亏比和有效期、盈亏比算错都会提示；写全且算对不报警',()=>{
@@ -51,8 +51,8 @@ test('自检：超长、新单缺盈亏比和有效期、盈亏比算错都会�
   const ok=lintDraft('审核正文：进场限价82,314.42，距现价+0.99%；止损83,960.71；目标75,729.27，盈亏比1:4，小仓位，有效期到10月31日。\n\n送审备注：可发。');
   assert.deepEqual(ok,[]);
 });
-test('提示词固定了强制句后的关系句，并禁止把费率当方向理由',()=>{
-  for(const phrase of ['我这张单先定好最多亏多少，再倒推仓位。','硬上限500字','只作温度描述','程序已定的交易决定'])
+test('提示词不再要求强制句，并禁止把费率当方向理由',()=>{
+  for(const phrase of ['硬上限500字','只作温度描述','程序已定的交易决定'])
     assert.equal(DRAFT_SYSTEM.includes(phrase),true,phrase);
 });
 test('自检：编造的“据报道”数字、系统自述词、超过500字都会被点出来',()=>{
@@ -69,4 +69,11 @@ test('自检：热点里是5.266亿，正文四舍五入写5.27亿不算编造',
   const body='审核正文：昨天ETF净流入约5.27亿美元（据报道）。\n\n送审备注：可发。';
   assert.equal(lintDraft(body,null,'ETF录得约5.266亿美元净流入').some(w=>w.includes('据报道')),false);
   assert.equal(lintDraft(body,null,'ETF录得约3.1亿美元净流入').some(w=>w.includes('据报道')),true);
+});
+
+test('强制句已停用：提示词明确禁止，自检会点出',()=>{
+  assert.equal(DRAFT_SYSTEM.includes('必须原样写入这句强制句'),false);
+  assert.equal(DRAFT_SYSTEM.includes('已明确停用这两句'),true);
+  const warnings=lintDraft('审核正文：多数人在高波动币上亏钱不是看错方向，是按「本金比例」而不是「风险比例」下单。\n\n送审备注：可发。');
+  assert.equal(warnings.some(w=>w.includes('已停用')),true);
 });

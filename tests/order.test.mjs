@@ -63,7 +63,7 @@ test('非主流币不出单；价格来源冲突写进备注',()=>{
 
 test('正文与程序不一致会被自检拦下',()=>{
   const plan=buildOrderPlan(snapshot(),'2026-10-20');
-  const good='审核正文：进场限价82,314.42，距现价+0.99%，止损83,960.71，目标75,729.27，盈亏比1:4，仓位0.50仓，有效期到11月4日。\n\n送审备注：可发。';
+  const good='审核正文：进场限价82,314.42，距现价+0.99%，止损83,960.71，目标75,729.27，盈亏比1:4，仓位0.50仓，有效期到11月4日。成交前日线收盘站上50日均线就作废。\n\n送审备注：可发。';
   assert.deepEqual(checkAgainstPlan(good,plan),[]);
   assert.equal(lintDraft(good,plan).some(item=>item.includes('程序计算')),false);
   const bad=good.replace('0.50仓','0.17仓').replace('83,960.71','83,900');
@@ -110,4 +110,13 @@ test('台账核对出应更新的项目，会写进待人工事项',()=>{
   const plan=buildOrderPlan(snap,'2026-10-20');
   assert.equal(plan.human_checks[0].includes('台账有1项应更新'),true);
   assert.equal(plan.human_checks[0].includes('止损上移请人工看'),false);
+});
+
+test('程序给出作废与撤单条件和2R/3R价位，与台账第35期同口径',()=>{
+  const snap=snapshot({screen:{'候选':[{...candidate(),'进场':2585.57,'止损':2637.28,'目标':2378.72}]}});
+  snap.summary['指标'].BTC.ma50=2553.1;
+  const block=orderBlock(buildOrderPlan(snap,'2026-10-20'));
+  assert.equal(block.includes('50日均线（目前约 2,553.10）'),true);
+  assert.equal(block.includes('2,482.15'),true);
+  assert.equal(block.includes('2,430.44'),true);
 });
