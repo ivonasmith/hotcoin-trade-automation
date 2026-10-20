@@ -66,6 +66,15 @@ test('数字规范化：中文日期/亿/万与英文月份/million/thousand 等
   assert.equal(numberDiff('50日均线','50-day average').ok,true);
   assert.deepEqual(numberTokens('看 https://x.com/a/123 链接 15天','zh'),['15']);
 });
+test('K/千缩写与区间：80K 与 80,000 等价，区间共用单位',()=>{
+  assert.equal(numberDiff('BTC在80K、81K之间','BTC between 80,000 and 81,000').ok,true);
+  assert.equal(numberDiff('BTC在80-81K之间','BTC between 80,000 and 81,000').ok,true);
+  assert.equal(numberDiff('BTC在80K-81K之间','BTC between $80K-$81K').ok,true);
+  assert.equal(numberDiff('回到8万','back to 80K').ok,true);
+  assert.equal(numberDiff('3千万美元','x').ok,false);
+  assert.equal(numberDiff('80K','80').ok,false);
+  assert.equal(numberDiff('5M流入','5 million inflow').ok,true);
+});
 test('英文稿自检：中文字符、缺数字、多数字、缺币种标记',()=>{
   assert.deepEqual(englishProblems(BODY,EN),[]);
   assert.ok(englishProblems(BODY,EN+' 好').some(p=>p.includes('中文')));

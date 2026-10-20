@@ -32,6 +32,7 @@ Hard rules:
 - Keep every number exactly. Prices keep their thousands separators and decimals (2,585.57). Percentages keep their sign (+4.54%). Ratios stay 1:4. Position sizes keep their value ("0.12仓" -> "0.12 size").
 - Dates: "10月31日" -> "Oct 31". Money: "5.27亿美元" -> "$527 million"; "7.6万" -> "76,000". Averages: "50日均线" -> "50-day moving average".
 - Keep every $TICKER as written.
+- Keep abbreviations like 80K, 5M exactly as written; never expand "80K" to "80,000" or the reverse. Ranges like "80-81K" stay in the same form.
 - Do not add, remove, round, convert or explain anything. Do not add numbers (no years, no counts, no list numbers).
 - First person, short sentences, plain English. No markdown, no headings, no emoji, no hashtags, no link.
 - Output only the English post text. It must contain no Chinese characters.`;
@@ -43,12 +44,16 @@ const stripUrls=text=>String(text).replace(/https?:\/\/\S+/g,' ');
 // Every numeric fact in a post as a comparable token, so zh "10月31日" / "5.27亿" equals en "Oct 31" / "$527 million".
 export function numberTokens(text,lang) {
   let rest=stripUrls(text);
+  // "80-81K" / "80–81千" share one unit: expand to "80K-81K" so both ends scale the same way.
+  rest=rest.replace(/(\d[\d,]*(?:\.\d+)?)\s*([-–~～至到])\s*(\d[\d,]*(?:\.\d+)?)\s*([kKmM千万亿])(?![A-Za-z])/g,'$1$4$2$3$4');
   const out=[];
   const take=(regex,fn)=>{ rest=rest.replace(regex,(...m)=>{ out.push(fn(m)); return ' '; }); };
   if(lang==='zh') {
     take(/(\d{1,2})月(\d{1,2})日/g,m=>`d:${Number(m[1])}/${Number(m[2])}`);
     take(/(\d[\d,]*(?:\.\d+)?)\s*亿/g,m=>canon(Number(m[1].replace(/,/g,''))*1e8));
     take(/(\d[\d,]*(?:\.\d+)?)\s*万/g,m=>canon(Number(m[1].replace(/,/g,''))*1e4));
+    take(/(\d[\d,]*(?:\.\d+)?)\s*千/g,m=>canon(Number(m[1].replace(/,/g,''))*1e3));
+    take(/(\d[\d,]*(?:\.\d+)?)\s*([kKmMbB])(?![A-Za-z])/g,m=>canon(Number(m[1].replace(/,/g,''))*{k:1e3,m:1e6,b:1e9}[m[2].toLowerCase()]));
   } else {
     take(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/gi,
       m=>`d:${MONTHS[m[1].toLowerCase()]}/${Number(m[2])}`);
