@@ -64,16 +64,23 @@ async function withRetry(run,attempts=2,delayMs=1500) {
   }
 }
 function anthropicFailure(error) {
-  const status=Number(error?.status)||502;
-  const reason={
+  const status=Number(error?.status)||null;
+  const byKind={timeout:'Claude官方API响应超时，没有在等待时间内返回。',
+    network:'连不上Claude官方API（网络连接失败）。',
+    non_json:'Claude官方API返回的不是正常数据。'}[error?.kind];
+  const byStatus={
     400:'请求格式或模型名不被Claude API接受。',
     401:'API Key无效、已撤销，或复制时缺少字符。',
     402:'Claude API账户没有可用预付额度。',
     403:'当前API账户、地区或组织没有访问权限。',
     404:'该API账户目前无法使用填写的模型。',
     429:'Claude API额度或调用频率已达到限制。',
-  }[status]||'Claude API暂时无法完成检查。';
-  return {status,reason};
+    529:'Claude API当前过载，请稍后重试。',
+  }[status];
+  const fallback=status?'Claude API暂时无法完成检查。':(error?.message||'Claude API暂时无法完成检查。');
+  const label=status?`HTTP ${status}`:({timeout:'请求超时',network:'网络错误'}[error?.kind]||'无状态码');
+  const detail=String(error?.providerMessage||'').replace(/sk-[A-Za-z0-9_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
+  return {status,label,reason:byKind||byStatus||fallback,detail,attempts:Number(error?.attempts)||1};
 }
 function apiNebulaFailure(error) {
   // `status` is the real HTTP status when the server answered, otherwise null (never a made-up 502).
@@ -96,13 +103,42 @@ async function telegram(env,method,payload) {
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{
     method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 }
+const DEFAULT_MODEL='claude-sonnet-5-5';
+const draftPrompt=hotspots=>`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`;
+async function anthropicDraft(env,hotspots) {
+  if(!env.ANTHROPIC_API_KEY) throw Error('未配置Claude官方API');
+  const model=env.ANTHROPIC_MODEL||DEFAULT_MODEL;
+  const request={method:'POST',
+    headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','Content-Type':'application/json'},
+    body:JSON.stringify({model,max_tokens:1800,system:DRAFT_SYSTEM,
+      messages:[{role:'user',content:draftPrompt(hotspots)}]})};
+  const {answer,text}=await withRetry(async()=>{
+    const result=await provider('https://api.anthropic.com/v1/messages',request,45000);
+    const joined=(result.content||[]).filter(block=>block.type==='text').map(block=>block.text).join('').trim();
+    if(!joined) throw Error('模型未返回草稿');
+    return {answer:result,text:joined};
+  });
+  return {content:text,model,usage:answer.usage||null};
+}
+// Explicit AI_PROVIDER wins. When unset, keep today's behaviour: ApiNebula if configured, else the official API.
+function draftProvider(env) {
+  if(['anthropic','apinebula','gemini'].includes(env.AI_PROVIDER)) return env.AI_PROVIDER;
+  if(env.APINEBULA_API_KEY) return 'apinebula';
+  if(env.ANTHROPIC_API_KEY) return 'anthropic';
+  return 'apinebula';
+}
+async function generateDraft(env,hotspots,which) {
+  if(which==='gemini') throw Error('Gemini暂未接入送审稿，请在后台改选Claude官方或ApiNebula');
+  const make=which==='anthropic'?anthropicDraft:apiNebulaDraft;
+  return {...await make(env,hotspots),provider:which};
+}
 async function apiNebulaDraft(env,hotspots) {
   if(!env.APINEBULA_API_KEY) throw Error('未配置ApiNebula');
-  const model=env.APINEBULA_MODEL||'claude-sonnet-5-5';
+  const model=env.APINEBULA_MODEL||DEFAULT_MODEL;
   const request={
     method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
     body:JSON.stringify({model,max_tokens:1800,
-      messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:`北京时间日期：${beijingDay()}\n\n今日输入包（含Grok热点与可能存在的已验证交易快照）：\n${hotspots}`}]})};
+      messages:[{role:'system',content:DRAFT_SYSTEM},{role:'user',content:draftPrompt(hotspots)}]})};
   // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
   const result=await withRetry(async()=>{
     const answer=await provider('https://apinebula.ai/v1/chat/completions',request,45000);
@@ -212,14 +248,14 @@ export class TradeDesk {
       }
       if(path==='/admin/anthropic/check' && request.method==='POST') {
         if(!env.ANTHROPIC_API_KEY) return page('请先保存Claude API密钥','<a href="/admin">返回后台</a>',409);
-        const model=env.ANTHROPIC_MODEL||'claude-sonnet-5';
+        const model=env.ANTHROPIC_MODEL||DEFAULT_MODEL;
         let result;
         try {
           result=await provider(`https://api.anthropic.com/v1/models/${encodeURIComponent(model)}`,{
             headers:{'x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01'}});
         } catch(error) {
           const failure=anthropicFailure(error);
-          return page('Claude连接检查未通过',`<p>${escapeHTML(failure.reason)}</p><p>状态码：<code>HTTP ${failure.status}</code></p><p>模型：<code>${escapeHTML(model)}</code></p><p><a href="/admin">返回后台</a></p>`,409);
+          return page('Claude连接检查未通过',`<p>${escapeHTML(failure.reason)}</p><p>状态：<code>${escapeHTML(failure.label)}</code></p><p>模型：<code>${escapeHTML(model)}</code></p>${failure.detail?`<p>平台返回：<code>${escapeHTML(failure.detail)}</code></p>`:''}<p><a href="/admin">返回后台</a></p>`,409);
         }
         const available=result.id===model;
         return page(available?'Claude连接检查通过':'Claude模型不可用',
@@ -227,7 +263,7 @@ export class TradeDesk {
       }
       if(path==='/admin/apinebula/check' && request.method==='POST') {
         if(!env.APINEBULA_API_KEY) return page('请先保存ApiNebula令牌','<a href="/admin">返回后台</a>',409);
-        const model=env.APINEBULA_MODEL||'claude-sonnet-5';
+        const model=env.APINEBULA_MODEL||DEFAULT_MODEL;
         try {
           const result=await provider('https://apinebula.ai/v1/chat/completions',{
             method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,
@@ -257,14 +293,14 @@ export class TradeDesk {
       ['TELEGRAM_BOT_TOKEN','Telegram Bot Token','password'],['TELEGRAM_OWNER_ID','Telegram审核人ID（接通机器人后获取）','text'],
       ['GEMINI_API_KEY','Gemini API Key（备用）','password'],
       ['ANTHROPIC_API_KEY','Claude官方 API Key','password'],
-      ['ANTHROPIC_MODEL','Claude官方模型名（默认 claude-sonnet-5）','text'],
+      ['ANTHROPIC_MODEL','Claude官方模型名（默认 claude-sonnet-5-5）','text'],
       ['APINEBULA_API_KEY','ApiNebula API令牌','password'],
       ['APINEBULA_MODEL','ApiNebula模型名（按模型广场填写）','text']]
       .map(([name,label,type])=>`<p><label>${label}<br><input style="width:95%;font:inherit;padding:8px" name="${name}" type="${type}" autocomplete="off" placeholder="${env[name]?'已保存；留空保持':'待填写'}"></label></p>`).join('');
     const selected=env.AI_PROVIDER||'anthropic';
     const providerName={anthropic:'Claude官方',apinebula:'ApiNebula',gemini:'Gemini'}[selected];
     const providerField=`<p><label>首选撰稿模型<br><select style="width:98%;font:inherit;padding:8px" name="AI_PROVIDER"><option value="apinebula" ${selected==='apinebula'?'selected':''}>ApiNebula（Claude兼容）</option><option value="anthropic" ${selected==='anthropic'?'selected':''}>Claude官方</option><option value="gemini" ${selected==='gemini'?'selected':''}>Gemini</option></select></label></p>`;
-    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||'claude-sonnet-5')}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||'claude-sonnet-5')}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
+    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||DEFAULT_MODEL)}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||DEFAULT_MODEL)}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
   }
   async connect(url,env) {
     if(!env.X_CLIENT_ID || !env.X_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY)
@@ -367,7 +403,7 @@ export class TradeDesk {
       return json({ok:true});
     }
     await this.ctx.storage.put('draft:'+day,{status:'generating',started:Date.now()});
-    let promptChars=0;
+    let promptChars=0,which=draftProvider(env);
     try {
       const snapshot=await this.ctx.storage.get('snapshot:'+day);
       const compact=snapshot?compactSnapshot(snapshot):null;
@@ -375,7 +411,8 @@ export class TradeDesk {
       const verified=compact?`\n\n已通过程序新鲜度校验的当日交易快照${compact.trimmed?`（体积已压缩：长列表只保留前${compact.items}项，被省略的内容不得推测）`:''}：\n${compact.body}`:
         '\n\n当日交易快照：尚未上传。禁止生成交易动作。';
       const hotspots=saved.parts.join('\n\n');
-      const generated=await apiNebulaDraft(env,hotspots+verified);
+      which=draftProvider(env);
+      const generated=await generateDraft(env,hotspots+verified,which);
       // Deterministic safety nets: $ prefix on coins, and a format check the reviewer can see.
       const content=normalizeTickers(generated.content,collectTickers(snapshot,hotspots));
       const lint=lintDraft(content);
@@ -388,9 +425,9 @@ export class TradeDesk {
           {text:'↩️ 退回重写',callback_data:`text_reject:${day}`}
         ]]}});
     } catch(error) {
-      const failure=apiNebulaFailure(error);
-      await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),
-        model:env.APINEBULA_MODEL||'claude-sonnet-5-5',http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
+      const failure=which==='anthropic'?anthropicFailure(error):apiNebulaFailure(error);
+      await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),provider:which,
+        model:(which==='anthropic'?env.ANTHROPIC_MODEL:env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
       await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}可发送 /draft 再试。`});
     }
     return json({ok:true});

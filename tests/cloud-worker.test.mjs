@@ -236,12 +236,13 @@ test('ApiNebula错误显示平台原因但遮盖密钥',async()=>{
     assert.equal(html.includes('sk-nebula-secret'),false);
   } finally {globalThis.fetch=old;}
 });
-function draftSetup(fetchImpl) {
+function draftSetup(fetchImpl,extraEnv={},anthropicImpl=null) {
   const ctx=setup({TELEGRAM_WEBHOOK_SECRET:'hook-secret',TELEGRAM_BOT_TOKEN:'test-token',
-    TELEGRAM_OWNER_ID:'123',APINEBULA_API_KEY:'sk-nebula-secret',APINEBULA_MODEL:'claude-sonnet-5-5'});
-  const calls={telegram:[],nebula:[]};
+    TELEGRAM_OWNER_ID:'123',APINEBULA_API_KEY:'sk-nebula-secret',APINEBULA_MODEL:'claude-sonnet-5-5',...extraEnv});
+  const calls={telegram:[],nebula:[],anthropic:[]};
   const old=globalThis.fetch;
   globalThis.fetch=async(url,options)=>{
+    if(String(url).includes('api.anthropic.com')) {calls.anthropic.push({url:String(url),headers:options.headers,body:JSON.parse(options.body)});return anthropicImpl(calls.anthropic.length);}
     if(String(url).includes('apinebula.ai')) {calls.nebula.push(JSON.parse(options.body));return fetchImpl(calls.nebula.length);}
     calls.telegram.push(JSON.parse(options.body));
     return Response.json({ok:true});
@@ -316,5 +317,74 @@ test('模型漏写$时由程序补上，汉字数字在Telegram消息里被提�
     assert.equal(message.includes('⚠ 格式自检'),true);
     assert.equal(message.includes('八万二千三'),true);
     assert.equal(entries.get('draft:'+day).content.includes('$BTC'),true);
+  } finally {restore();}
+});
+
+const officialOk=()=>Response.json({content:[{type:'text',text:'审核正文：今天不开新单。\n\n送审备注：可发。'}],usage:{input_tokens:10,output_tokens:20}});
+test('选官方Claude后用Messages接口出稿：密钥头、system提示词、不带temperature',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Error('不应调用ApiNebula');},
+    {AI_PROVIDER:'anthropic',ANTHROPIC_API_KEY:'sk-ant-secret-key',ANTHROPIC_MODEL:'claude-sonnet-5-5'},officialOk);
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,0);
+    const sent=calls.anthropic[0];
+    assert.equal(sent.url,'https://api.anthropic.com/v1/messages');
+    assert.equal(sent.headers['x-api-key'],'sk-ant-secret-key');
+    assert.equal(sent.headers['anthropic-version'],'2023-06-01');
+    assert.equal(sent.body.model,'claude-sonnet-5-5');
+    assert.equal(sent.body.system.includes('严禁提出新单'),true);
+    assert.equal(sent.body.messages[0].role,'user');
+    assert.equal('temperature' in sent.body,false);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.status,'pending_text_review');
+    assert.equal(draft.provider,'anthropic');
+    assert.equal(calls.telegram.at(-1).text.includes('今天不开新单'),true);
+  } finally {restore();}
+});
+test('未设置供应商时保持原行为：两个都配了就用ApiNebula',async()=>{
+  const {desk,calls,restore}=draftSetup(()=>Response.json({choices:[{message:{content:'审核正文：a\n\n送审备注：b'}}]}),
+    {ANTHROPIC_API_KEY:'sk-ant-secret-key'},()=>{throw Error('不应调用官方');});
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,1);
+    assert.equal(calls.anthropic.length,0);
+  } finally {restore();}
+});
+test('未设置供应商且只配了官方密钥时自动用官方',async()=>{
+  const {desk,calls,restore}=draftSetup(()=>{throw Error('不应调用ApiNebula');},
+    {APINEBULA_API_KEY:'',ANTHROPIC_API_KEY:'sk-ant-secret-key'},officialOk);
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.anthropic.length,1);
+  } finally {restore();}
+});
+test('官方Claude密钥无效时提示API Key问题且不重试，不泄露密钥',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Error('x');},
+    {AI_PROVIDER:'anthropic',ANTHROPIC_API_KEY:'sk-ant-secret-key'},
+    ()=>Response.json({type:'error',error:{type:'authentication_error',message:'invalid x-api-key sk-ant-secret-key'}},{status:401}));
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.anthropic.length,1);
+    const message=calls.telegram.at(-1).text;
+    assert.equal(message.includes('API Key'),true);
+    assert.equal(message.includes('sk-ant-secret-key'),false);
+    assert.equal(entries.get('draft:'+day).provider,'anthropic');
+  } finally {restore();}
+});
+test('官方Claude过载529时自动重试一次并成功',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Error('x');},
+    {AI_PROVIDER:'anthropic',ANTHROPIC_API_KEY:'sk-ant-secret-key'},
+    n=>n===1?Response.json({type:'error',error:{type:'overloaded_error',message:'Overloaded'}},{status:529}):officialOk());
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.anthropic.length,2);
+    assert.equal(entries.get('draft:'+day).status,'pending_text_review');
+  } finally {restore();}
+});
+test('选了Gemini但尚未接入出稿时明确说明，不静默失败',async()=>{
+  const {desk,calls,restore}=draftSetup(()=>{throw Error('x');},{AI_PROVIDER:'gemini'});
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.telegram.at(-1).text.includes('Gemini暂未接入'),true);
   } finally {restore();}
 });
