@@ -83,6 +83,25 @@ function anthropicFailure(error) {
   const detail=String(error?.providerMessage||'').replace(/sk-[A-Za-z0-9_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
   return {status,label,reason:byKind||byStatus||fallback,detail,attempts:Number(error?.attempts)||1};
 }
+function bedrockFailure(error) {
+  const status=Number(error?.status)||null;
+  const byKind={timeout:'亚马逊Bedrock响应超时，没有在等待时间内返回。',
+    network:'连不上亚马逊Bedrock（网络连接失败）。',
+    non_json:'亚马逊Bedrock返回的不是正常数据。'}[error?.kind];
+  const byStatus={
+    400:'Bedrock不接受当前模型编号、区域或请求格式。',
+    401:'Bedrock API Key无效、已过期，或复制时缺少字符。',
+    403:'这把Key没有调用权限：多半是Key的权限没勾Bedrock，或该模型还没在Bedrock里开通访问。',
+    404:'这个区域找不到填写的模型编号。',
+    408:'Bedrock处理超时。',
+    424:'Bedrock模型暂时不可用。',
+    429:'Bedrock额度或调用频率已达到限制。',
+    503:'Bedrock当前繁忙，请稍后重试。'}[status];
+  const fallback=status?'Bedrock暂时无法完成检查。':(error?.message||'Bedrock暂时无法完成检查。');
+  const label=status?`HTTP ${status}`:({timeout:'请求超时',network:'网络错误'}[error?.kind]||'无状态码');
+  const detail=String(error?.providerMessage||'').replace(/ABSK[A-Za-z0-9+/=_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
+  return {status,label,reason:byKind||byStatus||fallback,detail,attempts:Number(error?.attempts)||1};
+}
 function apiNebulaFailure(error) {
   // `status` is the real HTTP status when the server answered, otherwise null (never a made-up 502).
   const status=Number(error?.status)||null;
@@ -121,16 +140,38 @@ async function anthropicDraft(env,hotspots) {
   });
   return {content:text,model,usage:answer.usage||null};
 }
+const BEDROCK_MODEL='us.anthropic.claude-sonnet-5-5';
+const bedrockUrl=env=>`https://bedrock-runtime.${env.BEDROCK_REGION||'us-east-2'}.amazonaws.com/model/${encodeURIComponent(env.BEDROCK_MODEL||BEDROCK_MODEL)}/converse`;
+async function bedrockCall(env,body,timeoutMs) {
+  return provider(bedrockUrl(env),{method:'POST',
+    headers:{Authorization:`Bearer ${env.BEDROCK_API_KEY}`,'Content-Type':'application/json'},
+    body:JSON.stringify(body)},timeoutMs);
+}
+async function bedrockDraft(env,hotspots) {
+  if(!env.BEDROCK_API_KEY) throw Error('未配置亚马逊Bedrock');
+  const model=env.BEDROCK_MODEL||BEDROCK_MODEL;
+  const body={system:[{text:DRAFT_SYSTEM}],
+    messages:[{role:'user',content:[{text:draftPrompt(hotspots)}]}],
+    inferenceConfig:{maxTokens:4000}};
+  const {answer,text}=await withRetry(async()=>{
+    const result=await bedrockCall(env,body,70000);
+    const joined=(result.output?.message?.content||[]).map(block=>block.text||'').join('').trim();
+    if(!joined) throw Error('模型未返回草稿');
+    return {answer:result,text:joined};
+  });
+  return {content:text,model,usage:answer.usage||null};
+}
 // Explicit AI_PROVIDER wins. When unset, keep today's behaviour: ApiNebula if configured, else the official API.
 function draftProvider(env) {
-  if(['anthropic','apinebula','gemini'].includes(env.AI_PROVIDER)) return env.AI_PROVIDER;
+  if(['anthropic','apinebula','gemini','bedrock'].includes(env.AI_PROVIDER)) return env.AI_PROVIDER;
   if(env.APINEBULA_API_KEY) return 'apinebula';
+  if(env.BEDROCK_API_KEY) return 'bedrock';
   if(env.ANTHROPIC_API_KEY) return 'anthropic';
   return 'apinebula';
 }
 async function generateDraft(env,hotspots,which) {
   if(which==='gemini') throw Error('Gemini暂未接入送审稿，请在后台改选Claude官方或ApiNebula');
-  const make=which==='anthropic'?anthropicDraft:apiNebulaDraft;
+  const make={anthropic:anthropicDraft,bedrock:bedrockDraft}[which]||apiNebulaDraft;
   return {...await make(env,hotspots),provider:which};
 }
 async function apiNebulaDraft(env,hotspots) {
@@ -209,13 +250,15 @@ export class TradeDesk {
         const raw=await request.text();
         if(raw.length>20000) return json({ok:false},413);
         const form=new URLSearchParams(raw),config={};
-        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','AI_PROVIDER']) {
+        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER']) {
           const value=form.get(name)?.trim();
           if(value) {
             if(value.length>2000 || /[\r\n]/.test(value)) return json({ok:false,error:'字段格式有误'},400);
             if(name==='TELEGRAM_OWNER_ID' && !/^\d+$/.test(value)) return json({ok:false,error:'审核人ID应为数字'},400);
-            if(name==='AI_PROVIDER' && !['anthropic','apinebula','gemini'].includes(value)) return json({ok:false,error:'模型供应商无效'},400);
+            if(name==='AI_PROVIDER' && !['anthropic','apinebula','gemini','bedrock'].includes(value)) return json({ok:false,error:'模型供应商无效'},400);
             if(name==='ANTHROPIC_MODEL' && !/^claude-[a-z0-9-]+$/.test(value)) return json({ok:false,error:'Claude模型名格式有误'},400);
+            if(name==='BEDROCK_REGION' && !/^[a-z]{2}-[a-z]+-\d$/.test(value)) return json({ok:false,error:'Bedrock区域格式有误，例如 us-east-2'},400);
+            if(name==='BEDROCK_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'Bedrock模型编号格式有误'},400);
             if(name==='APINEBULA_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'ApiNebula模型名格式有误'},400);
             config[name]=value;
           }
@@ -262,6 +305,17 @@ export class TradeDesk {
         return page(available?'Claude连接检查通过':'Claude模型不可用',
           `<p>${available?`已确认API密钥可以访问 ${escapeHTML(model)}；本次检查没有生成正文。`:'请检查API额度、地区权限和模型名。'}</p><p><a href="/admin">返回后台</a></p>`,available?200:409);
       }
+      if(path==='/admin/bedrock/check' && request.method==='POST') {
+        if(!env.BEDROCK_API_KEY) return page('请先保存Bedrock API Key','<a href="/admin">返回后台</a>',409);
+        const model=env.BEDROCK_MODEL||BEDROCK_MODEL;
+        try {
+          await bedrockCall(env,{messages:[{role:'user',content:[{text:'ping'}]}],inferenceConfig:{maxTokens:16}},30000);
+        } catch(error) {
+          const failure=bedrockFailure(error);
+          return page('Bedrock连接检查未通过',`<p>${escapeHTML(failure.reason)}</p><p>状态：<code>${escapeHTML(failure.label)}</code></p><p>区域：<code>${escapeHTML(env.BEDROCK_REGION||'us-east-2')}</code> · 模型：<code>${escapeHTML(model)}</code></p>${failure.detail?`<p>平台返回：<code>${escapeHTML(failure.detail)}</code></p>`:''}<p><a href="/admin">返回后台</a></p>`,409);
+        }
+        return page('Bedrock连接检查通过',`<p>已确认这把Key能在 ${escapeHTML(env.BEDROCK_REGION||'us-east-2')} 调用 ${escapeHTML(model)}（仅发送了一个很短的测试请求）。</p><p><a href="/admin">返回后台</a></p>`);
+      }
       if(path==='/admin/apinebula/check' && request.method==='POST') {
         if(!env.APINEBULA_API_KEY) return page('请先保存ApiNebula令牌','<a href="/admin">返回后台</a>',409);
         const model=env.APINEBULA_MODEL||DEFAULT_MODEL;
@@ -295,13 +349,16 @@ export class TradeDesk {
       ['GEMINI_API_KEY','Gemini API Key（备用）','password'],
       ['ANTHROPIC_API_KEY','Claude官方 API Key','password'],
       ['ANTHROPIC_MODEL','Claude官方模型名（默认 claude-sonnet-5-5）','text'],
+      ['BEDROCK_API_KEY','亚马逊Bedrock API Key（长期）','password'],
+      ['BEDROCK_REGION','Bedrock区域（默认 us-east-2）','text'],
+      ['BEDROCK_MODEL','Bedrock模型编号（默认 us.anthropic.claude-sonnet-5-5）','text'],
       ['APINEBULA_API_KEY','ApiNebula API令牌','password'],
       ['APINEBULA_MODEL','ApiNebula模型名（按模型广场填写）','text']]
       .map(([name,label,type])=>`<p><label>${label}<br><input style="width:95%;font:inherit;padding:8px" name="${name}" type="${type}" autocomplete="off" placeholder="${env[name]?'已保存；留空保持':'待填写'}"></label></p>`).join('');
     const selected=env.AI_PROVIDER||'anthropic';
-    const providerName={anthropic:'Claude官方',apinebula:'ApiNebula',gemini:'Gemini'}[selected];
-    const providerField=`<p><label>首选撰稿模型<br><select style="width:98%;font:inherit;padding:8px" name="AI_PROVIDER"><option value="apinebula" ${selected==='apinebula'?'selected':''}>ApiNebula（Claude兼容）</option><option value="anthropic" ${selected==='anthropic'?'selected':''}>Claude官方</option><option value="gemini" ${selected==='gemini'?'selected':''}>Gemini</option></select></label></p>`;
-    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||DEFAULT_MODEL)}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||DEFAULT_MODEL)}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
+    const providerName={anthropic:'Claude官方',bedrock:'亚马逊Bedrock',apinebula:'ApiNebula',gemini:'Gemini'}[selected];
+    const providerField=`<p><label>首选撰稿模型<br><select style="width:98%;font:inherit;padding:8px" name="AI_PROVIDER"><option value="apinebula" ${selected==='apinebula'?'selected':''}>ApiNebula（Claude兼容）</option><option value="anthropic" ${selected==='anthropic'?'selected':''}>Claude官方</option><option value="bedrock" ${selected==='bedrock'?'selected':''}>亚马逊Bedrock</option><option value="gemini" ${selected==='gemini'?'selected':''}>Gemini</option></select></label></p>`;
+    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||DEFAULT_MODEL)}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||DEFAULT_MODEL)}</li><li>亚马逊Bedrock：${env.BEDROCK_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.BEDROCK_REGION||'us-east-2')} · ${escapeHTML(env.BEDROCK_MODEL||BEDROCK_MODEL)}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/bedrock/check">${hidden}<button ${env.BEDROCK_API_KEY?'':'disabled'}>检查Bedrock连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
   }
   async connect(url,env) {
     if(!env.X_CLIENT_ID || !env.X_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY)
@@ -427,9 +484,9 @@ export class TradeDesk {
           {text:'↩️ 退回重写',callback_data:`text_reject:${day}`}
         ]]}});
     } catch(error) {
-      const failure=which==='anthropic'?anthropicFailure(error):apiNebulaFailure(error);
+      const failure=({anthropic:anthropicFailure,bedrock:bedrockFailure}[which]||apiNebulaFailure)(error);
       await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),provider:which,
-        model:(which==='anthropic'?env.ANTHROPIC_MODEL:env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
+        model:(which==='anthropic'?env.ANTHROPIC_MODEL:which==='bedrock'?(env.BEDROCK_MODEL||BEDROCK_MODEL):env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
       await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}可发送 /draft 再试。`});
     }
     return json({ok:true});

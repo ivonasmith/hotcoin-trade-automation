@@ -236,12 +236,13 @@ test('ApiNebula错误显示平台原因但遮盖密钥',async()=>{
     assert.equal(html.includes('sk-nebula-secret'),false);
   } finally {globalThis.fetch=old;}
 });
-function draftSetup(fetchImpl,extraEnv={},anthropicImpl=null) {
+function draftSetup(fetchImpl,extraEnv={},anthropicImpl=null,bedrockImpl=null) {
   const ctx=setup({TELEGRAM_WEBHOOK_SECRET:'hook-secret',TELEGRAM_BOT_TOKEN:'test-token',
     TELEGRAM_OWNER_ID:'123',APINEBULA_API_KEY:'sk-nebula-secret',APINEBULA_MODEL:'claude-sonnet-5-5',...extraEnv});
-  const calls={telegram:[],nebula:[],anthropic:[]};
+  const calls={telegram:[],nebula:[],anthropic:[],bedrock:[]};
   const old=globalThis.fetch;
   globalThis.fetch=async(url,options)=>{
+    if(String(url).includes('bedrock-runtime')) {calls.bedrock.push({url:String(url),headers:options.headers,body:JSON.parse(options.body)});return bedrockImpl(calls.bedrock.length);}
     if(String(url).includes('api.anthropic.com')) {calls.anthropic.push({url:String(url),headers:options.headers,body:JSON.parse(options.body)});return anthropicImpl(calls.anthropic.length);}
     if(String(url).includes('apinebula.ai')) {calls.nebula.push(JSON.parse(options.body));return fetchImpl(calls.nebula.length);}
     calls.telegram.push(JSON.parse(options.body));
@@ -386,5 +387,40 @@ test('选了Gemini但尚未接入出稿时明确说明，不静默失败',async(
   try {
     await desk.makeDraft(123,desk.env);
     assert.equal(calls.telegram.at(-1).text.includes('Gemini暂未接入'),true);
+  } finally {restore();}
+});
+
+const bedrockOk=()=>Response.json({output:{message:{role:'assistant',content:[{reasoningContent:{reasoningText:{text:'想一下'}}},{text:'审核正文：今天不开新单。'},{text:'\n\n送审备注：可发。'}]}},usage:{inputTokens:10,outputTokens:20}});
+test('选Bedrock后用Converse接口出稿：Bearer密钥、区域、模型编号、只取文字块',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Error('不应调用ApiNebula');},
+    {AI_PROVIDER:'bedrock',BEDROCK_API_KEY:'ABSKsecretsecretsecret'},null,bedrockOk);
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,0);
+    const sent=calls.bedrock[0];
+    assert.equal(sent.url,'https://bedrock-runtime.us-east-2.amazonaws.com/model/us.anthropic.claude-sonnet-5-5/converse');
+    assert.equal(sent.headers.Authorization,'Bearer ABSKsecretsecretsecret');
+    assert.equal(sent.body.system[0].text.includes('严禁提出新单'),true);
+    assert.equal('temperature' in (sent.body.inferenceConfig||{}),false);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.status,'pending_text_review');
+    assert.equal(draft.provider,'bedrock');
+    assert.equal(draft.content.includes('想一下'),false);
+    assert.equal(draft.content.includes('今天不开新单'),true);
+  } finally {restore();}
+});
+test('Bedrock返回403时给出权限说明且不泄露密钥',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Error('x');},
+    {AI_PROVIDER:'bedrock',BEDROCK_API_KEY:'ABSKsecretsecretsecret'},null,
+    ()=>Response.json({message:'User is not authorized ABSKsecretsecretsecret'},{status:403}));
+  try {
+    await desk.makeDraft(123,desk.env);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.status,'generation_failed');
+    assert.equal(draft.http_status,403);
+    assert.equal(calls.bedrock.length,1);
+    const text=calls.telegram.at(-1).text;
+    assert.equal(text.includes('Bedrock'),true);
+    assert.equal(text.includes('ABSKsecretsecretsecret'),false);
   } finally {restore();}
 });
