@@ -46,3 +46,11 @@ test('Telegram可展示X返回的HTTP状态和原始错误',()=>{
   const error=Error('服务请求失败');error.status=403;error.providerMessage='You are not allowed to create a Post';
   assert.equal(xErrorReason(error),'HTTP 403：You are not allowed to create a Post');
 });
+
+test('已确认付费账号时不再查询订阅字段，直接按长帖上限检查',async()=>{
+  const {checkPostLength}=await import('../cloud/x.mjs');
+  const calls=[];
+  const result=await checkPostLength({token:'t',text:'中'.repeat(600),premium:true,request:async(...a)=>{calls.push(a);return {};}});
+  assert.equal(calls.length,0);
+  assert.equal(result.limit,25000);
+});

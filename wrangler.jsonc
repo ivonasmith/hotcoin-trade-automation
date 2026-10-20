@@ -13,6 +13,7 @@
     "EXPECTED_X_USERNAME": "Uncle_Onchain",
     "RUN_MODE": "live",
     "PUBLISH_ENABLED": "true",
+    "X_PREMIUM": "true",
     "TRADE_LOG_URL": "https://bottlenose-muse-07e.notion.site/HotCoinDesk-Trade-Record-3cfb72fc8cae808d9deecfdc21f4cba5"
   },
   "observability": { "enabled": false }

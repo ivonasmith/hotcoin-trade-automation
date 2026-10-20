@@ -381,7 +381,7 @@ export class Flow {
       const account=await this.s.get('x-account');
       if(!account || account.username?.toLowerCase()!==String(this.env.EXPECTED_X_USERNAME).toLowerCase()) throw Error('X账号与预期不符');
       const token=await accessToken({storage:this.s,env:this.env,request:this.d.provider,now:this.now()});
-      await checkPostLength({token,text,request:this.d.provider});
+      await checkPostLength({token,text,request:this.d.provider,premium:this.env.X_PREMIUM==='true'});
       const mediaIds=[];
       for(const key of keys) {
         const bytes=await this.d.tgDownload(this.env,flow.files[key].file_id);

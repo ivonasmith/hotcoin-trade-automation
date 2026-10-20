@@ -36,8 +36,9 @@ export async function postTextLimit({token,request}) {
   return (paid(user.subscription) || paid(user.subscription_type) || user.verified===true)?PREMIUM_POST_LIMIT:NORMAL_POST_LIMIT;
 }
 
-export async function checkPostLength({token,text,request}) {
-  const length=weightedLength(text),limit=await postTextLimit({token,request});
+export async function checkPostLength({token,text,request,premium=false}) {
+  // premium=true: the owner has confirmed the account is paid; X may not return the subscription field, so skip the lookup.
+  const length=weightedLength(text),limit=premium?PREMIUM_POST_LIMIT:await postTextLimit({token,request});
   if(length>limit) throw Error(`X正文为${length}个加权字符，当前账号上限为${limit}，已在上传图片前停止发布`);
   return {length,limit};
 }
