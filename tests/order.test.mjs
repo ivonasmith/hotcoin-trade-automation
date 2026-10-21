@@ -140,3 +140,24 @@ test('程序给出作废与撤单条件和2R/3R价位，与台账第35期同口�
   assert.equal(block.includes('2,482.15'),true);
   assert.equal(block.includes('2,430.44'),true);
 });
+
+test('风险提示：支撑落在进场与目标之间、目标超过3倍ATR、贴近MA200，只写备注，不改订单',()=>{
+  const snap=snapshot({price:100});
+  snap.summary['指标'].BTC={price:100,atr_d_pct:2.5,dev200:4.0,
+    d1_below:[{mid:96,dist:-4,segs:4},{mid:60,dist:-40,segs:5},{mid:97,dist:-3,segs:2}]};
+  snap.summary['做空筛选'].BTC['候选']=[candidate({'进场':102,'止损':104.04,'目标':93.84,'距现价%':2})];
+  const plan=buildOrderPlan(snap,'2026-10-20');
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.order.target,93.84);
+  const risk=plan.notes.filter(item=>item.startsWith('风险提示'));
+  assert.equal(risk.length,3);
+  assert.match(risk[0],/下方 96.*之间/);
+  assert.match(risk.join('\n'),/日线ATR14（2\.50%）的3\.2倍/);
+  assert.match(risk.join('\n'),/MA200上方 4\.0%/);
+  assert.equal(risk.join('').includes('60'),false,'目标以下的支撑不提示');
+  assert.equal(orderBlock(plan).includes('风险提示'),true);
+});
+test('没有支撑/ATR/MA200数据时不加风险提示',()=>{
+  const plan=buildOrderPlan(snapshot(),'2026-10-20');
+  assert.equal(plan.notes.some(item=>item.startsWith('风险提示')),false);
+});

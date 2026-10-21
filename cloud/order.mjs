@@ -59,6 +59,27 @@ function ledgerView(ledger,day) {
     symbolsWithShort:new Set(active.filter(item=>item.side==='做空').map(item=>item.symbol))};
 }
 
+// Warnings only: the order itself is not changed. The target is a mechanical 4R, so nothing in the order rules checks
+// whether support sits on the way down, how close MA200 is, or whether the coin can really travel that far in 15 days.
+// Each line is for the reviewer (送审备注), thresholds are judgement, not backtested.
+export function riskNotes(symbol,order,m) {
+  if(!order || !m) return [];
+  const notes=[];
+  const atr=num(m.atr_d_pct),price=num(m.price),dev200=num(m.dev200);
+  const supports=(Array.isArray(m.d1_below)?m.d1_below:[]).filter(level=>num(level.mid)!==null && num(level.segs)>=3
+    && level.mid<(price??order.entry) && level.mid>order.target && level.mid<order.entry);
+  for(const level of supports.slice(0,2))
+    notes.push(`风险提示：$${symbol} 下方 ${fmtPrice(level.mid)}（距现价${fmtPct(level.dist)}，${level.segs}段接触）落在进场 ${fmtPrice(order.entry)} 与目标 ${fmtPrice(order.target)} 之间；目标是按4R机械算的，没考虑这条承接，到不到目标要你判断`);
+  if(atr!==null && atr>0) {
+    const targetPct=(order.entry-order.target)/order.entry*100;
+    if(targetPct>3*atr)
+      notes.push(`风险提示：$${symbol} 目标距进场 ${targetPct.toFixed(1)}%，是日线ATR14（${atr.toFixed(2)}%）的${(targetPct/atr).toFixed(1)}倍，有效期内走到的可能偏低（止损按2%下限算，所以目标被拉远）`);
+    if(dev200!==null && dev200>=0 && dev200<=2*atr)
+      notes.push(`风险提示：$${symbol} 现价只在MA200上方 ${dev200.toFixed(1)}%（不到2倍日线ATR），下方有长期均线承接，做空空间可能比目标小`);
+  }
+  return notes;
+}
+
 export function buildOrderPlan(snapshot,day) {
   const summary=snapshot?.summary;
   const plan={allowed:false,order:null,reasons:[],human_checks:[],notes:[],day};
@@ -178,6 +199,7 @@ export function buildOrderPlan(snapshot,day) {
   }
   plan.allowed=true;
   if(view) plan.notes.push(`台账已读取（更新到 ${view.updated_to||'未知'}）：在场${view.active.length}张，挂单${view.pending}/${MAX_PENDING}，主流币空单${view.majorShorts.length}/${MAX_SAME_SIDE_MAJOR}，名义约${Math.round(view.notional)}美元；加上本单仍在上限内`);
+  plan.notes.push(...riskNotes(symbol,plan.order,metrics[symbol]));
   if(plan.order.touched_recent) plan.notes.push('这个价位15天内被碰过，仓位已按程序打折');
   if(multiplier<1) plan.notes.push('宏观层折扣已触发，仓位已按程序打折');
   plan.human_checks.unshift(...humanChecks);
