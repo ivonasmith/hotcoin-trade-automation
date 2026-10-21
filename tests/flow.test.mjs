@@ -535,3 +535,23 @@ test('X以4xx拒绝发帖：确定没发出去，标记失败而不是未知；/
   assert.equal(await h.flow.retryPost(DAY),false,'已发布的不会再发');
   assert.equal(sent.length,count);
 });
+
+test('同一天第二期：前一期发完后收起，新期号接着数；没发完不能收起',async()=>{
+  const h=harness();
+  await toAwaitingFinal(h);
+  await h.flow.finalApprove(DAY,1);
+  assert.equal(await h.flow.archiveDay(DAY),false,'还有待发布的，不能收起');
+  const flow=await h.flow.getFlow(DAY);
+  await h.flow.s.put('flow:'+DAY,{...flow,slots:{zh:{due:1,status:'posted'},en:{due:2,status:'posted'}}});
+  assert.equal(await h.flow.archiveDay(DAY),true);
+  assert.equal((await h.flow.getFlow(DAY)).status,'archived');
+  assert.deepEqual(await h.flow.s.get('issues'),{[DAY+'#1']:36});
+  // 台账已更新到今天（第36期），但同一天已有收起的第36期，所以新的一期是第37期
+  assert.equal(issueNumber({...LEDGER,updated_to:DAY,updated_issue:36},DAY,await h.flow.s.get('issues')),37);
+  // 新热点出新稿、文字通过后，可以重新走一遍正式稿流程
+  await seed(h);
+  await h.flow.startFormal(DAY);
+  const next=await h.flow.getFlow(DAY);
+  assert.equal(next.status,'poster_pending');
+  assert.equal(next.rev,2);
+});

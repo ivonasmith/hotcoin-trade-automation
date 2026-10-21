@@ -103,6 +103,9 @@ export function englishProblems(zh,en) {
 export function issueNumber(ledger,day,used={}) {
   if(!ledger || ledger.ok!==true || !Number.isInteger(ledger.updated_issue) || !ledger.updated_to) return null;
   if(Number.isInteger(used[day])) return used[day];
+  // A second issue on the same date (e.g. a make-up post earlier that day): follow the archived one.
+  const sameDay=Object.entries(used).filter(([d,n])=>d!==day && d.slice(0,10)===day && Number.isInteger(n)).map(([,n])=>n);
+  if(sameDay.length) return Math.max(ledger.updated_issue,...sameDay)+1;
   if(ledger.updated_to>=day) return ledger.updated_issue;
   const earlier=Object.entries(used).filter(([d,n])=>d<day && Number.isInteger(n)).map(([,n])=>n);
   return Math.max(ledger.updated_issue,...earlier)+1;

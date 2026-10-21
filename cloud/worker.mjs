@@ -562,10 +562,13 @@ export class TradeDesk {
     }
     const locked=await this.ctx.storage.get('flow:'+day);
     if(locked && ['final_approved'].includes(locked.status)) {
-      await telegram(env,'sendMessage',{chat_id:chat,text:'今天的稿件已经终审通过并排好发布，不能再重写。'});
-      return json({ok:true});
-    }
-    if(locked) await this.ctx.storage.delete('flow:'+day); // an unfinished flow belongs to the old draft
+      // Everything already published or skipped: shelve it and let the same date carry the next issue.
+      if(!(await this.flow(env).archiveDay(day))) {
+        const state=Object.entries(locked.slots||{}).map(([lang,slot])=>`${lang==='zh'?'中文':'英文'}：${slot.status}`).join('，');
+        await telegram(env,'sendMessage',{chat_id:chat,text:`今天已通过的那期还没发完（${state||'没有排期'}），不能再重写。发完或处理完后再发 /hotspots；失败的先发 /retrypost。`});
+        return json({ok:true});
+      }
+    } else if(locked) await this.ctx.storage.delete('flow:'+day); // an unfinished flow belongs to the old draft
     const existing=await this.ctx.storage.get('draft:'+day);
     if(existing?.status==='generating' && !force) {
       await telegram(env,'sendMessage',{chat_id:chat,text:'今日送审稿正在生成，请稍候。'});

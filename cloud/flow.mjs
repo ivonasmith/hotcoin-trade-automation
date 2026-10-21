@@ -45,7 +45,7 @@ export class Flow {
     // Only one run may start; a second tap while one is running (or after) finds the key taken.
     const started=await this.s.transaction(async tx=>{
       const existing=await tx.get(this.flowKey(day));
-      if(existing && !['formal_failed','poster_failed','final_rejected'].includes(existing.status)) return null;
+      if(existing && !['formal_failed','poster_failed','final_rejected','archived'].includes(existing.status)) return null;
       const next={day,status:'formal_generating',rev:(existing?.rev||0)+1,started:this.now(),slots:{},history:existing?.history||[]};
       await tx.put(this.flowKey(day),next);
       return next;
@@ -427,6 +427,22 @@ export class Flow {
     await this.arm();
     await this.startFormal(day);
     return true;
+  }
+  // A day's issue has been fully published (or skipped): shelve it so the same date can carry another issue.
+  async archiveDay(day) {
+    return this.s.transaction(async tx=>{
+      const flow=await tx.get(this.flowKey(day));
+      if(!flow || flow.status!=='final_approved') return false;
+      const slots=Object.values(flow.slots||{});
+      if(!slots.length || !slots.every(slot=>['posted','dry_run','skipped'].includes(slot.status))) return false;
+      await tx.put(`archive:${day}:${flow.rev}`,{flow,draft:await tx.get('draft:'+day),archived:this.now()});
+      const {[day]:issue,...rest}=(await tx.get('issues'))||{};
+      if(Number.isInteger(issue)) rest[`${day}#${flow.rev}`]=issue;
+      await tx.put('issues',rest);
+      await tx.put(this.flowKey(day),{day,status:'archived',rev:flow.rev,slots:{},history:[...(flow.history||[]),{rev:flow.rev,issue:flow.issue}]});
+      await tx.delete('draft:'+day);
+      return true;
+    });
   }
   // Re-send a slot whose last attempt failed (or ended unknown and the reviewer checked X: nothing was posted).
   async retryPost(day) {
