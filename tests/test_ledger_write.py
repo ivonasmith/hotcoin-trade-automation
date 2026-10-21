@@ -115,6 +115,40 @@ class LedgerWriteTest(unittest.TestCase):
         self.assertEqual(run(self.fake, order_payload(order=None, proposals=proposals)), [])
         self.assertEqual(mutations(self.fake), count)
 
+    def test_unattended_fill_writes_log_and_counters_but_not_the_issue_line(self):
+        before_active = copy.deepcopy(self.table("二、"))
+        summary_before = self.summary()
+        fills = [{"type": "fill", "issue": "35", "symbol": "ETH", "date": "2026-10-21", "text": "x"},
+                 {"type": "stop_out", "issue": "36", "symbol": "SOL", "date": "2026-10-21", "price": 160.0, "text": "不自动写"}]
+        done = lw.apply_fills(fills, "2026-10-21", call=self.fake.call, page_url=URL)
+        self.assertEqual(done, ["第35期ETH成交"])
+        self.assertEqual(self.table("二、"), before_active, "原行不改")
+        log = self.table("六、")
+        self.assertEqual([r[3] for r in log[1:]], ["成交"], "只写成交，不写止损等其他类型")
+        summary = self.summary()
+        self.assertEqual(summary["更新至"], summary_before["更新至"], "期号逻辑读的更新至一字不动")
+        self.assertEqual((summary["挂单未成交"], summary["持仓中笔数"]), ("0 笔", "2 笔"))
+        ledger = fl.fetch_ledger(URL, "t", lambda path, token: self.fake.call("GET", path))
+        self.assertEqual({r["symbol"]: r["status"] for r in ledger["active"]}, {"ETH": "持仓中", "SOL": "持仓中"})
+        self.assertEqual((ledger["updated_issue"], ledger["updated_to"]), (35, "2026-10-16"))
+        count = mutations(self.fake)
+        self.assertEqual(lw.apply_fills(fills, "2026-10-21", call=self.fake.call, page_url=URL), [])
+        self.assertEqual(mutations(self.fake), count, "重复运行不重复写")
+
+    def test_issue_time_job_after_unattended_fill_does_not_double_count(self):
+        fill = [{"type": "fill", "issue": "35", "symbol": "ETH", "date": "2026-10-21", "text": "x"}]
+        lw.apply_fills(fill, "2026-10-21", call=self.fake.call, page_url=URL)
+        run(self.fake, order_payload(order=None, proposals=fill))
+        self.assertEqual(len(self.table("六、")), 2, "日志里只有表头和一行")
+        summary = self.summary()
+        self.assertEqual((summary["挂单未成交"], summary["持仓中笔数"]), ("0 笔", "2 笔"))
+
+    def test_unattended_fill_after_issue_time_job_is_skipped(self):
+        fill = [{"type": "fill", "issue": "35", "symbol": "ETH", "date": "2026-10-21", "text": "x"}]
+        run(self.fake, order_payload(order=None, proposals=fill))
+        self.assertEqual(lw.apply_fills(fill, "2026-10-21", call=self.fake.call, page_url=URL), [])
+        self.assertEqual(self.summary()["持仓中笔数"], "2 笔")
+
     def test_stop_out_books_pnl_from_the_close_price(self):
         proposals = [{"type": "stop_out", "issue": "36", "symbol": "SOL", "date": "2026-10-20", "price": 160.0, "text": "止损"}]
         run(self.fake, order_payload(order=None, proposals=proposals))

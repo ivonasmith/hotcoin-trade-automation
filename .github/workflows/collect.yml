@@ -78,6 +78,7 @@ jobs:
         run: |
           python pipeline/fetch_ledger.py runtime
           python pipeline/ledger_sync.py runtime
+          python pipeline/ledger_autofill.py runtime
       - name: 计算海报数据（涨腿天数、回撤、山寨窗口）
         if: steps.calendar.outputs.proceed == 'true' && success()
         continue-on-error: true

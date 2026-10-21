@@ -141,8 +141,7 @@ def find_row(rows, want):
     return None
 
 
-def apply_summary(page, call, deltas, record):
-    """deltas: dict of counters; record: text for 更新至. Returns True when something was written."""
+def summary_editor(page, call):
     info = page.refresh("一、")
     rows = {r["text"][0]: r for r in info["rows"][1:] if r["text"]}
 
@@ -156,7 +155,16 @@ def apply_summary(page, call, deltas, record):
         call("PATCH", f"/blocks/{row['id']}", {"table_row": {"cells": cells}})
         row["text"][1] = text
 
-    counters = {"已了结笔数": "closed", "持仓中笔数": "open", "挂单未成交": "pending", "公开作废": "cancel", "过期未成交": "expire"}
+    return rows, num, put
+
+
+COUNTERS = {"已了结笔数": "closed", "持仓中笔数": "open", "挂单未成交": "pending", "公开作废": "cancel", "过期未成交": "expire"}
+
+
+def apply_summary(page, call, deltas, record):
+    """deltas: dict of counters; record: text for 更新至. Returns True when something was written."""
+    rows, num, put = summary_editor(page, call)
+    counters = COUNTERS
     for label, key in counters.items():
         if deltas.get(key) and label in rows:
             put(label, f"{int(num(label) + deltas[key])} 笔")
@@ -294,6 +302,41 @@ def apply(payload, token=None, call=None, page_url=None):
         append_rows(call, page.section("二、"), [new_row])
         actions.append(f"当前在场新增 {payload['order']['symbol']} 第{issue}期")
     return actions
+
+
+def apply_fills(proposals, day, token=None, call=None, page_url=None):
+    """Unattended write used by the daily data collection: a fill is a market fact (the price traded through the
+    entry), so it must not wait for the next issue to be approved. Writes ONLY fills, and only the status log row
+    (the reader derives the status from it) plus the two counters. The 更新至 text is left alone on purpose: the issue
+    numbering reads it, and a fill is not an issue. The same key as the issue-time ledger job is used, so whichever
+    runs second skips it. Order: log row first (commit point), then counters; a crash in between leaves a counter one off
+    (display only) but never a duplicate row."""
+    call = call or notion_request(token)
+    page = Page(call, fl.page_id(page_url or fl.DEFAULT_LEDGER_URL))
+    active = page.section("二、")
+    if not active:
+        raise RuntimeError("台账里没找到“二、当前在场”表格，不写入")
+    log_info = page.section("六、")
+    log_keys = {r["text"][8] for r in (log_info["rows"][1:] if log_info else []) if len(r["text"]) > 8}
+    summary_text = (find_row(page.section("一、")["rows"], {0: "更新至"}) or {"text": ["", ""]})["text"][1]
+    fills = [p for p in proposals if p.get("type") == "fill"]
+    entries = [e for e in status_entries(day, fills, active["rows"]) if e["key"] not in log_keys]
+    if not entries:
+        return []
+    log = ensure_log(page, call)
+    append_rows(call, log, [e["row"] for e in entries])
+    deltas = {}
+    for entry in entries:
+        if entry["key"] in summary_text:
+            continue  # the issue-time job already counted it before it crashed
+        for k, v in entry["deltas"].items():
+            deltas[k] = deltas.get(k, 0) + v
+    if deltas:
+        rows, num, put = summary_editor(page, call)
+        for label, key in COUNTERS.items():
+            if deltas.get(key) and label in rows:
+                put(label, f"{int(num(label) + deltas[key])} 笔")
+    return [e["desc"] for e in entries]
 
 
 def main(job_payload, token):

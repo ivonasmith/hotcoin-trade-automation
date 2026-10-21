@@ -1,0 +1,52 @@
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+PIPE = Path(__file__).resolve().parent.parent / "pipeline"
+sys.path.insert(0, str(PIPE))
+import fetch_ledger  # noqa: E402
+import ledger_autofill as auto  # noqa: E402
+import ledger_sync  # noqa: E402
+import ledger_write  # noqa: E402
+
+
+def runtime_with(proposals, ok=True):
+    tmp = tempfile.mkdtemp()
+    (Path(tmp) / "ledger.json").write_text(json.dumps({"ok": ok, "active": [], "proposals": proposals}))
+    return tmp
+
+
+class AutofillTest(unittest.TestCase):
+    def test_writes_only_fills_then_refreshes_ledger_and_check(self):
+        rt = runtime_with([{"type": "fill", "issue": "36", "symbol": "SOL", "date": "2026-10-21"}, {"type": "expire", "issue": "1"}])
+        with mock.patch.dict(os.environ, {"NOTION_TOKEN": "t"}), \
+                mock.patch.object(ledger_write, "apply_fills", return_value=["第36期SOL成交"]) as apply, \
+                mock.patch.object(fetch_ledger, "main") as fetch, mock.patch.object(ledger_sync, "main") as sync:
+            self.assertEqual(auto.main(rt), 0)
+        self.assertEqual([p["type"] for p in apply.call_args.args[0]], ["fill"])
+        fetch.assert_called_once_with(rt)
+        sync.assert_called_once_with(rt)
+
+    def test_nothing_to_do_touches_nothing(self):
+        for rt in (runtime_with([]), runtime_with([{"type": "expire"}]), runtime_with([{"type": "fill"}], ok=False)):
+            with mock.patch.dict(os.environ, {"NOTION_TOKEN": "t"}), \
+                    mock.patch.object(ledger_write, "apply_fills") as apply:
+                self.assertEqual(auto.main(rt), 0)
+            apply.assert_not_called()
+
+    def test_failure_or_missing_token_never_blocks_the_upload(self):
+        rt = runtime_with([{"type": "fill", "issue": "36", "symbol": "SOL"}])
+        with mock.patch.dict(os.environ, {"NOTION_TOKEN": "", "NOTION_API_KEY": ""}):
+            self.assertEqual(auto.main(rt), 0)
+        with mock.patch.dict(os.environ, {"NOTION_TOKEN": "t"}), \
+                mock.patch.object(ledger_write, "apply_fills", side_effect=RuntimeError("boom")):
+            self.assertEqual(auto.main(rt), 0)
+        self.assertEqual(auto.main("/nonexistent"), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
