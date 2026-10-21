@@ -4,9 +4,9 @@
 // canonical order plus the reasons when there is none. The model only writes it up.
 const CORE=['BTC','ETH','SOL','XRP','BNB'];
 // Coins the program may write an order for. Core coins come first (they win ties); the rest are screened coins the owner
-// treats like majors (10-21): buyback pool UNI/CAKE/HYPE plus ENA/TAO/LDO/ZEC and DOGE (a meme by origin, but a top-cap
+// treats like majors (10-21): the whole 17-coin daily list plus AAVE/WLD/SUI/INJ (DOGE is a meme by origin, but a top-cap
 // long-standing coin, so not treated as a small meme). Anything else that passes the screen still needs a human decision.
-const TRADABLE=[...CORE,'UNI','CAKE','HYPE','ENA','TAO','LDO','ZEC','DOGE'];
+const TRADABLE=[...CORE,'UNI','CAKE','HYPE','ENA','TAO','RAY','DOGE','LDO','ARB','NEAR','ZEC','JUP','AAVE','WLD','SUI','INJ'];
 const BASE_USD=2000;
 const VALID_DAYS=15;
 const PRICE_TOLERANCE=0.0001; // 0.01% between sources before we call it a conflict

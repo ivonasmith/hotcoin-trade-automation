@@ -27,7 +27,7 @@
   固定 2 个     BTC、SOL
   优先池        BNB、UNI、CAKE、HYPE（09-20新增：回购销毁优先池，机制已核实为链上
                 真实执行，见操作规格V5.0第06节，每天自动带上，不用手动敲）
-  山寨轮动观察池 ENA、TAO、RAY、DOGE、LDO、ARB、NEAR、ZEC、JUP（09-21新增：
+  山寨轮动观察池 ENA、TAO、RAY、DOGE、LDO、ARB、NEAR、ZEC、JUP、AAVE、WLD、SUI、INJ（09-21新增，10-21加后四个：
                 《山寨补涨板块轮动预警框架》V1 + 《BTC节奏跟随》两份文档里的
                 补涨候选优先级1/2名单，每天自动带上，用来喂"山寨轮动纸面观察日志"，
                 纯观察验证，不进P0-P3实盘判断）
@@ -55,7 +55,8 @@ except ImportError:
 固定 = ["BTC", "SOL", "ETH", "XRP"]  # 09-29新增XRP：五大主流币(BTC/ETH/SOL/XRP/BNB)里
 # 前三个在固定、BNB在优先池，只有XRP两边都不在，之前靠orders.json硬覆盖，那条路废了就直接补进固定
 优先池 = ["BNB", "UNI", "CAKE", "HYPE"]  # 09-20新增：回购销毁优先池，每天自动覆盖
-山寨轮动观察池 = ["ENA", "TAO", "RAY", "DOGE", "LDO", "ARB", "NEAR", "ZEC", "JUP"]
+山寨轮动观察池 = ["ENA", "TAO", "RAY", "DOGE", "LDO", "ARB", "NEAR", "ZEC", "JUP",
+              "AAVE", "WLD", "SUI", "INJ"]  # 10-21：用户加 AAVE/WLD/SUI/INJ，和前面的币一起可出单
 # 09-21新增：喂"山寨轮动纸面观察日志"用的，纯观察验证，见上方说明
 
 

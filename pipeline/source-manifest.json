@@ -1,8 +1,10 @@
 {
   "每日取数.py": {
     "source_sha256": "f1db11788ea70cd0e060cf49d7022cce56546fdc8a348b5096c7206a45d5fe14",
-    "vendor_sha256": "f1db11788ea70cd0e060cf49d7022cce56546fdc8a348b5096c7206a45d5fe14",
-    "changes": []
+    "vendor_sha256": "f0098b5592fb9d22ce91de9614704641e8ad0b4212aaa5ef477eeaeb79dae037",
+    "changes": [
+      "10-21：山寨轮动观察池加入 AAVE、WLD、SUI、INJ（和原有币一起可由程序出单）"
+    ]
   },
   "拉数据.py": {
     "source_sha256": "8b71475c325e6573691ba0c087b7224248703f3ad269c865af756aa9c0149b43",
