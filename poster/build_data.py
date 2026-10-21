@@ -84,11 +84,15 @@ def build(payload):
 
     rows = []
     seen = set()
+    fills = {(str(f.get("issue")), f.get("symbol")) for f in (ledger.get("fills") or [])}
     for item in ledger.get("active") or []:
         if item.get("status") not in ("挂单中", "持仓中") or not all(item.get(k) for k in ("entry", "stop", "target")):
             continue
         seen.add((str(item.get("issue")), item.get("symbol")))
-        rows.append(_row(item["symbol"], item.get("side", "做空"), item.get("tier"), item["status"],
+        status = item["status"]
+        if status == "挂单中" and (str(item.get("issue")), item.get("symbol")) in fills:
+            status = "持仓中"   # 台账程序已判定盘中触及进场，但写入要等终审之后
+        rows.append(_row(item["symbol"], item.get("side", "做空"), item.get("tier"), status,
                          item.get("size") or 1.0, item["entry"], item["stop"], item["target"], prices.get(item["symbol"])))
     if order and (issue, order["symbol"]) not in seen:
         rows.append(_row(order["symbol"], "做空", "慢档日线", "挂单中", order["size"], order["entry"], order["stop"],

@@ -115,6 +115,10 @@ test('海报任务载荷缺台账或海报数据时直接拒绝',()=>{
   const p=posterPayload({day:DAY,issue:37,draft:{order:ORDER},snapshot:SNAPSHOT,body:BODY,english:EN});
   assert.equal(p.prices.ETH,2468.2);
   assert.equal(p.order.entry,2585.57);
+  assert.deepEqual(p.ledger.fills,[{issue:'34',symbol:'BTC'}],'fixture already carries one fill proposal');
+  const withFill=posterPayload({day:DAY,issue:37,draft:{order:ORDER},body:BODY,english:EN,
+    snapshot:{...SNAPSHOT,ledger:{...LEDGER,proposals:[{type:'fill',issue:36,symbol:'SOL'},{type:'expire',issue:30,symbol:'ETH'}]}}});
+  assert.deepEqual(withFill.ledger.fills,[{issue:'36',symbol:'SOL'}],'已核出但还没写入台账的成交，海报按持仓中画');
 });
 
 test('文字稿通过后：正式稿数字一致，海报任务入队，重复触发不重复',async()=>{

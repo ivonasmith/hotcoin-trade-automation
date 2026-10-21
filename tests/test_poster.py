@@ -64,6 +64,17 @@ class BuildDataTest(unittest.TestCase):
         self.assertIn("-6.67%", rows[0]["pnl_zh"])
         self.assertIn("var(--red)", rows[0]["pnl_zh"])
 
+    def test_pending_row_with_unwritten_fill_is_shown_as_held(self):
+        p = payload()
+        p["prices"]["ETH"] = 2600.0          # price already through the 2585.57 entry
+        p["ledger"]["fills"] = [{"issue": "35", "symbol": "ETH"}]
+        _, rows, _ = bd.build(p)
+        eth = next(r for r in rows if r["sym"] == "ETH")
+        self.assertEqual(eth["state"], "持仓中")
+        self.assertNotIn("未成交", eth["pnl_zh"])
+        _, rows, _ = bd.build(payload())     # no fill proposal: still pending
+        self.assertEqual(next(r for r in rows if r["sym"] == "ETH")["state"], "挂单中")
+
     def test_order_already_in_ledger_is_not_duplicated(self):
         p = payload()
         p["issue"] = 35

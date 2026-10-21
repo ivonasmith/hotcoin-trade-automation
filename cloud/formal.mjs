@@ -130,7 +130,10 @@ export function posterPayload({day,issue,draft,snapshot,body,english}) {
   return {day,issue,formal:{zh:body,en:english},order,prices,
     ledger:{active:ledger.active||[],counts:ledger.counts||{},equity_usd:ledger.equity_usd,
       cumulative_pnl_usd:ledger.cumulative_pnl_usd,closed_recent:ledger.closed_recent||[],
-      updated_to:ledger.updated_to,updated_issue:ledger.updated_issue},
+      updated_to:ledger.updated_to,updated_issue:ledger.updated_issue,
+      // Fills the ledger check found but the ledger job has not written yet (it runs after final approval):
+      // the poster shows these as held, otherwise it says "未成交" while the price is already through the entry.
+      fills:(ledger.proposals||[]).filter(item=>item.type==='fill').map(item=>({issue:String(item.issue),symbol:item.symbol}))},
     facts:{leg:facts.leg,alt:facts.alt}};
 }
 
