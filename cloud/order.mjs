@@ -3,6 +3,10 @@
 // results (already computed by the collection scripts per 《操作规格》v6.5 §08) and produces one
 // canonical order plus the reasons when there is none. The model only writes it up.
 const CORE=['BTC','ETH','SOL','XRP','BNB'];
+// Coins the program may write an order for. Core coins come first (they win ties); the rest are screened coins the owner
+// treats like majors (10-21): buyback pool UNI/CAKE/HYPE plus ENA/TAO/LDO/ZEC and DOGE (a meme by origin, but a top-cap
+// long-standing coin, so not treated as a small meme). Anything else that passes the screen still needs a human decision.
+const TRADABLE=[...CORE,'UNI','CAKE','HYPE','ENA','TAO','LDO','ZEC','DOGE'];
 const BASE_USD=2000;
 const VALID_DAYS=15;
 const PRICE_TOLERANCE=0.0001; // 0.01% between sources before we call it a conflict
@@ -48,7 +52,7 @@ function ledgerView(ledger,day) {
   if(!ledger || ledger.ok!==true || !Array.isArray(ledger.active)) return null;
   const active=ledger.active.filter(item=>ACTIVE.includes(item.status));
   const pending=active.filter(item=>item.status==='挂单中').length;
-  const majorShorts=active.filter(item=>item.side==='做空' && CORE.includes(item.symbol));
+  const majorShorts=active.filter(item=>item.side==='做空' && TRADABLE.includes(item.symbol));
   const notional=active.reduce((sum,item)=>sum+BASE_USD*(Number(item.size)||0),0);
   const staleDays=ledger.updated_to?Math.floor((Date.parse(day+'T00:00:00Z')-Date.parse(ledger.updated_to+'T00:00:00Z'))/86400000):null;
   return {active,pending,majorShorts,notional,staleDays,updated_to:ledger.updated_to||null,
@@ -105,8 +109,8 @@ export function buildOrderPlan(snapshot,day) {
       plan.reasons.push(`$${symbol}：${screen['门③需要人工核实']}`);
       continue;
     }
-    if(!CORE.includes(symbol)) {
-      plan.human_checks.push(`$${symbol} 过了筛选但不是主流币，需先完成迷因币/小币裁决，程序不出单`);
+    if(!TRADABLE.includes(symbol)) {
+      plan.human_checks.push(`$${symbol} 过了筛选但不在程序可出单的名单里（名单：${TRADABLE.join('、')}），需要你先决定能不能做，程序不出单`);
       continue;
     }
     if(view?.symbolsWithShort.has(symbol)) {
@@ -131,7 +135,7 @@ export function buildOrderPlan(snapshot,day) {
     }
   }
   // One new order per post: main coins in fixed order, then the nearest level.
-  eligible.sort((a,b)=>CORE.indexOf(a.symbol)-CORE.indexOf(b.symbol)
+  eligible.sort((a,b)=>TRADABLE.indexOf(a.symbol)-TRADABLE.indexOf(b.symbol)
     ||Math.abs(a.candidate['距现价%']??1e9)-Math.abs(b.candidate['距现价%']??1e9));
   const {symbol,screen,candidate}=eligible[0];
   const entry=candidate['进场'],stop=candidate['止损'],target=candidate['目标'];

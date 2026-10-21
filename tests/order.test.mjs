@@ -50,7 +50,27 @@ test('宏观读数不全、缺做空筛选、缺快照都不出单',()=>{
   assert.equal(buildOrderPlan(null,'2026-10-20').allowed,false);
 });
 
-test('非主流币不出单；价格来源冲突写进备注',()=>{
+test('名单内的非五大币（UNI、DOGE等）和主流币一样出单；五大币优先；名单外的币仍不出单',()=>{
+  for(const symbol of ['UNI','CAKE','HYPE','ENA','TAO','LDO','ZEC','DOGE']) {
+    const alt=snapshot();
+    alt.summary['做空筛选'][symbol]={...alt.summary['做空筛选'].BTC,'标的':symbol};
+    delete alt.summary['做空筛选'].BTC;
+    const plan=buildOrderPlan(alt,'2026-10-20');
+    assert.equal(plan.allowed,true,symbol);
+    assert.equal(plan.order.symbol,symbol);
+  }
+  const both=snapshot();
+  both.summary['做空筛选'].UNI={...both.summary['做空筛选'].BTC,'标的':'UNI'};
+  assert.equal(buildOrderPlan(both,'2026-10-20').order.symbol,'BTC','五大币排在前面');
+  const out=snapshot();
+  out.summary['做空筛选'].RAY={...out.summary['做空筛选'].BTC,'标的':'RAY'};
+  delete out.summary['做空筛选'].BTC;
+  const plan=buildOrderPlan(out,'2026-10-20');
+  assert.equal(plan.allowed,false);
+  assert.equal(plan.human_checks.some(item=>item.includes('RAY')),true);
+});
+
+test('名单外的币不出单；价格来源冲突写进备注',()=>{
   const alt=snapshot();
   alt.summary['做空筛选'].ZRO={...alt.summary['做空筛选'].BTC,'标的':'ZRO'};
   delete alt.summary['做空筛选'].BTC;
