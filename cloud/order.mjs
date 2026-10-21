@@ -80,9 +80,16 @@ export function riskNotes(symbol,order,m) {
   return notes;
 }
 
-export function buildOrderPlan(snapshot,day) {
+export function buildOrderPlan(snapshot,day,now=Date.now()) {
   const summary=snapshot?.summary;
   const plan={allowed:false,order:null,reasons:[],human_checks:[],notes:[],day};
+  const finishedAt=Date.parse(snapshot?.report?.finished_at||'');
+  if(Number.isFinite(finishedAt)) {
+    const hours=(now-finishedAt)/3600000;
+    const when=new Date(finishedAt+8*3600000).toISOString().slice(5,16).replace('T',' ');
+    plan.notes.push(`行情快照采集完成于北京时间 ${when}（距现在约${hours.toFixed(1)}小时）`
+      +(hours>4?'：价格已不新，挂单前必须先对一下交易所实时价，进场价如果已被越过，这张单一挂出去就会立刻成交':''));
+  }
   const view=ledgerView(snapshot?.ledger,day);
   const humanChecks=[
     view?'熔断阶梯程序暂未核算（连续止损、账户回撤、利润回吐），请确认没有处于停机档':

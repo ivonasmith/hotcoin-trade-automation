@@ -161,3 +161,13 @@ test('没有支撑/ATR/MA200数据时不加风险提示',()=>{
   const plan=buildOrderPlan(snapshot(),'2026-10-20');
   assert.equal(plan.notes.some(item=>item.startsWith('风险提示')),false);
 });
+
+test('备注里写明行情快照的采集时间，超过4小时提示先核对实时价',()=>{
+  const snap=snapshot();
+  snap.report={finished_at:'2026-10-21T02:00:00Z'};
+  const fresh=buildOrderPlan(snap,'2026-10-21',Date.parse('2026-10-21T03:30:00Z'));
+  assert.match(fresh.notes[0],/北京时间 10-21 10:00（距现在约1\.5小时）$/);
+  const stale=buildOrderPlan(snap,'2026-10-21',Date.parse('2026-10-21T10:00:00Z'));
+  assert.match(stale.notes[0],/约8\.0小时）：价格已不新.*立刻成交/);
+  assert.equal(buildOrderPlan(snapshot(),'2026-10-21').notes.some(item=>item.includes('行情快照采集')),false);
+});
