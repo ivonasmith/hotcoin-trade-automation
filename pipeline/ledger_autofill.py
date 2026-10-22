@@ -21,6 +21,13 @@ def main(runtime="runtime"):
     try:
         ledger = json.loads(path.read_text())
         fills = [p for p in (ledger.get("proposals") or []) if p.get("type") == "fill"] if ledger.get("ok") else []
+        # A touch on the publish day itself may have happened BEFORE the order was published (daily bars cannot tell),
+        # and the ledger has precedents both ways, so those stay for a human; only later days are unambiguous.
+        published = {(str(r.get("issue")), r.get("symbol")): r.get("day") for r in ledger.get("active") or []}
+        held_back = [p for p in fills if str(p.get("date") or "") <= str(published.get((str(p.get("issue")), p.get("symbol"))) or "")]
+        for item in held_back:
+            print("::notice title=发布当天触及，未自动记成交::" + str(item.get("text", ""))[:200].replace("%", "%25"), flush=True)
+        fills = [p for p in fills if p not in held_back]
         if not fills:
             return 0
         token = os.environ.get("NOTION_TOKEN") or os.environ.get("NOTION_API_KEY") or ""

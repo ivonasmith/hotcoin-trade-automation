@@ -14,9 +14,12 @@ import ledger_sync  # noqa: E402
 import ledger_write  # noqa: E402
 
 
+ACTIVE = [{"issue": "36", "symbol": "SOL", "day": "2026-10-19"}, {"issue": "37", "symbol": "XRP", "day": "2026-10-21"}]
+
+
 def runtime_with(proposals, ok=True):
     tmp = tempfile.mkdtemp()
-    (Path(tmp) / "ledger.json").write_text(json.dumps({"ok": ok, "active": [], "proposals": proposals}))
+    (Path(tmp) / "ledger.json").write_text(json.dumps({"ok": ok, "active": ACTIVE, "proposals": proposals}))
     return tmp
 
 
@@ -30,6 +33,19 @@ class AutofillTest(unittest.TestCase):
         self.assertEqual([p["type"] for p in apply.call_args.args[0]], ["fill"])
         fetch.assert_called_once_with(rt)
         sync.assert_called_once_with(rt)
+
+    def test_touch_on_the_publish_day_is_left_for_a_human(self):
+        rt = runtime_with([{"type": "fill", "issue": "37", "symbol": "XRP", "date": "2026-10-21"},
+                           {"type": "fill", "issue": "36", "symbol": "SOL", "date": "2026-10-20"}])
+        with mock.patch.dict(os.environ, {"NOTION_TOKEN": "t"}), \
+                mock.patch.object(ledger_write, "apply_fills", return_value=["x"]) as apply, \
+                mock.patch.object(fetch_ledger, "main"), mock.patch.object(ledger_sync, "main"):
+            auto.main(rt)
+        self.assertEqual([(p["symbol"], p["date"]) for p in apply.call_args.args[0]], [("SOL", "2026-10-20")])
+        only_same_day = runtime_with([{"type": "fill", "issue": "37", "symbol": "XRP", "date": "2026-10-21"}])
+        with mock.patch.dict(os.environ, {"NOTION_TOKEN": "t"}), mock.patch.object(ledger_write, "apply_fills") as apply:
+            auto.main(only_same_day)
+        apply.assert_not_called()
 
     def test_nothing_to_do_touches_nothing(self):
         for rt in (runtime_with([]), runtime_with([{"type": "expire"}]), runtime_with([{"type": "fill"}], ok=False)):
