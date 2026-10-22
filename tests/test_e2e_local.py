@@ -102,8 +102,9 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(names, sorted(["poster_zh_第36期.png", "poster_zh_第36期-手机版.png", "poster_en_第36期.png", "poster_en_第36期-手机版.png"]))
         self.assertTrue(all(d["size"] > 50000 for d in st["log"]["docs"]))
         messages = [m for m in st["log"]["telegram"] if m["method"] == "sendMessage"]
-        self.assertTrue(any("中文正式稿" in m["text"] and "交易记录：https://notion.example/ledger" in m["text"] for m in messages))
-        self.assertTrue(any("英文正式稿" in m["text"] and "Trade log:" in m["text"] for m in messages))
+        self.assertTrue(any("中文正式稿" in m["text"] and "交易记录：" not in m["text"] for m in messages))
+        self.assertTrue(any("英文正式稿" in m["text"] and "Trade log:" not in m["text"] for m in messages))
+        self.assertTrue(any("台账链接" in m["text"] and "https://notion.example/ledger" in m["text"] for m in messages), "链接单独给用户")
         self.assertIn("图片与正式稿通过", json.dumps(messages[-1]["reply_markup"], ensure_ascii=False))
         self.assertEqual(st["entries"]["flow:" + DAY]["status"], "awaiting_final")
         # 3. final approval (tapped twice) -> ledger job + schedule
