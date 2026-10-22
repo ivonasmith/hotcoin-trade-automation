@@ -14,11 +14,16 @@ export function splitDraft(content) {
 // The formal Chinese post is the approved body, word for word, plus the trade-log link. No model touches it.
 // The opening line announces issue number and date; the program adds it because the program owns the issue number.
 export const postHeader=(lang,issue,day)=>lang==='zh'?`【热币分析·第${issue}期（${day}）】`:`【Hot Coin Desk · Issue ${issue} (${day})】`;
-export function formalChinese(body,tradeLogUrl,header='') {
-  return limitCashtags(`${header?header+'\n':''}${body.trim()}\n\n交易记录：${tradeLogUrl}`);
+// The post body carries no link: the ledger link goes in a reply that the owner posts by hand (owner's standing rule).
+export function formalChinese(body,header='') {
+  return limitCashtags(`${header?header+'\n':''}${body.trim()}`);
 }
-export function formalEnglish(text,tradeLogUrl,header='') {
-  return limitCashtags(`${header?header+'\n':''}${text.trim()}\n\nTrade log: ${tradeLogUrl}`);
+export function formalEnglish(text,header='') {
+  return limitCashtags(`${header?header+'\n':''}${text.trim()}`);
+}
+// Flows approved before this rule stored the link at the end of the post; strip it at publish time so they do not go out with it.
+export function stripTradeLog(text) {
+  return String(text).replace(/\s*(?:交易记录：|Trade log:)\s*https?:\/\/\S+\s*$/i,'');
 }
 
 // X rejects posts with more than one cashtag ($SYMBOL). Keep the first one as a cashtag; the rest stay as plain tickers.

@@ -4,7 +4,7 @@
 // One Durable Object owns all state, so every transition is a compare-and-set inside a transaction:
 // a double tap, a retried webhook or a re-delivered alarm can never repeat a step.
 import {beijingDay,eligible,dueAt} from '../calendar.mjs';
-import {splitDraft,formalChinese,formalEnglish,bodyProblems,TRANSLATE_SYSTEM,translatePrompt,englishProblems,
+import {splitDraft,formalChinese,formalEnglish,stripTradeLog,bodyProblems,TRANSLATE_SYSTEM,translatePrompt,englishProblems,
   issueNumber,posterNames,posterPayload,ledgerPayload,postHeader,limitCashtags} from './formal.mjs';
 import {accessToken,checkPostLength,uploadImage,createPost,xErrorReason} from './x.mjs';
 
@@ -71,8 +71,6 @@ export class Flow {
     const snapshot=await this.s.get('snapshot:'+day);
     const issue=issueNumber(snapshot?.ledger,day,(await this.s.get('issues'))||{});
     if(!issue) throw Error('台账没有读取成功，无法确定今天是第几期');
-    const url=this.env.TRADE_LOG_URL;
-    if(!url) throw Error('没有配置 Notion 交易记录链接');
     let english='',feedback='',model='';
     for(let attempt=1;attempt<=3;attempt++) {
       const result=await this.d.translate(this.env,body+(feedback?`\n\n（上一版的问题，请改正：${feedback}）`:''),TRANSLATE_SYSTEM,translatePrompt);
@@ -82,7 +80,7 @@ export class Flow {
       feedback=issues.join('；');
     }
     if(feedback) throw Error('英文稿和中文稿的数字没能核对一致：'+feedback);
-    const formal={zh:body,en:english,zh_post:formalChinese(body,url,postHeader('zh',issue,day)),en_post:formalEnglish(english,url,postHeader('en',issue,day)),model};
+    const formal={zh:body,en:english,zh_post:formalChinese(body,postHeader('zh',issue,day)),en_post:formalEnglish(english,postHeader('en',issue,day)),model};
     // The poster job needs the same body text and the same program order.
     const payload=posterPayload({day,issue,draft,snapshot,body,english});
     const names=posterNames(issue);
@@ -200,8 +198,9 @@ export class Flow {
     if(!moved || moved.status!=='awaiting_final') return {status:200};
     await this.arm();
     const f=moved.formal;
-    await this.say(`第${moved.issue}期 中文正式稿（${TIME_TEXT.zh} 北京时间）：\n\n${f.zh_post}`);
-    await this.say(`第${moved.issue}期 英文正式稿（${TIME_TEXT.en} 北京时间）：\n\n${f.en_post}`);
+    await this.say(`第${moved.issue}期 中文正式稿（${TIME_TEXT.zh} 北京时间）：\n\n${stripTradeLog(f.zh_post)}`);
+    await this.say(`第${moved.issue}期 英文正式稿（${TIME_TEXT.en} 北京时间）：\n\n${stripTradeLog(f.en_post)}`);
+    if(this.env.TRADE_LOG_URL) await this.say(`台账链接（帖子正文不带，评论区你自己发）：${this.env.TRADE_LOG_URL}`);
     await this.say(`第${moved.issue}期：上面4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致。\n通过后：台账由程序自动写入；中文${TIME_TEXT.zh}、英文${TIME_TEXT.en}按时间安排，`
       +(this.env.PUBLISH_ENABLED==='true'?'到点自动发布。':'目前发布总开关关闭，只演练、不发推。'),
       [[{text:'✅ 图片与正式稿通过',callback_data:`final_ok:${day}:${moved.rev}`},
@@ -371,7 +370,7 @@ export class Flow {
     const claimed=await this.slotCas(day,lang,late?['missed']:['scheduled'],{status:'publishing',claimed:this.now()});
     if(!claimed) return false;
     const flow=await this.getFlow(day);
-    const text=limitCashtags(flow.formal[lang+'_post']);
+    const text=limitCashtags(stripTradeLog(flow.formal[lang+'_post']));
     const keys=[lang+'_desktop',lang+'_mobile'];
     const live=this.env.PUBLISH_ENABLED==='true';
     try {

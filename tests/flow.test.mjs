@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Flow,GRACE_MS,WATCHDOG_MS} from '../cloud/flow.mjs';
-import {limitCashtags,numberTokens,numberDiff,englishProblems,issueNumber,splitDraft,ledgerPayload,posterPayload,bodyProblems,posterNames}
+import {stripTradeLog,limitCashtags,numberTokens,numberDiff,englishProblems,issueNumber,splitDraft,ledgerPayload,posterPayload,bodyProblems,posterNames}
   from '../cloud/formal.mjs';
 import {seal} from '../cloud/security.mjs';
 import {dueAt} from '../calendar.mjs';
@@ -130,8 +130,8 @@ test('文字稿通过后：正式稿数字一致，海报任务入队，重复�
   const flow=await h.flow.getFlow(DAY);
   assert.equal(flow.status,'poster_pending');
   assert.equal(flow.issue,36,'接着10-16的第35期；10-19、10-20没发布，不占期号');
-  assert.equal(flow.formal.zh_post,`【热币分析·第36期（${DAY}）】\n`+BODY+'\n\n交易记录：https://notion.example/ledger');
-  assert.equal(flow.formal.en_post,`【Hot Coin Desk · Issue 36 (${DAY})】\n`+EN+'\n\nTrade log: https://notion.example/ledger');
+  assert.equal(flow.formal.zh_post,`【热币分析·第36期（${DAY}）】\n`+BODY);
+  assert.equal(flow.formal.en_post,`【Hot Coin Desk · Issue 36 (${DAY})】\n`+EN);
   const peek=await h.flow.nextJob(true);
   assert.equal(peek.id,'poster:'+DAY+':1');
   assert.equal(await h.flow.enqueue({id:peek.id,type:'poster',day:DAY,payload:{}}),false);
@@ -200,8 +200,9 @@ test('出图完成：发中英文正式稿和按钮，图片没收齐则失败�
   const flow=await toAwaitingFinal(h);
   assert.equal(h.log.uploads.length,4);
   const messages=texts(h);
-  assert.ok(messages.some(t=>t.includes('中文正式稿')&&t.includes('交易记录：https://notion.example/ledger')));
-  assert.ok(messages.some(t=>t.includes('英文正式稿')&&t.includes('Trade log:')));
+  assert.ok(messages.some(t=>t.includes('中文正式稿')&&!t.includes('交易记录：')));
+  assert.ok(messages.some(t=>t.includes('英文正式稿')&&!t.includes('Trade log:')));
+  assert.ok(messages.some(t=>t.includes('台账链接')&&t.includes('https://notion.example/ledger')),'链接单独给你，供评论区使用');
   const buttons=h.log.telegram.at(-1);
   assert.deepEqual(rows(buttons),[`final_ok:${DAY}:1`,`final_reject:${DAY}:1`]);
   assert.match(JSON.stringify(buttons.reply_markup),/图片与正式稿通过/);
@@ -380,6 +381,14 @@ async function liveHarness(overrides={}) {
   await h.flow.s.put('x-tokens',await seal({access_token:'tok',refresh_token:'ref',obtained_at:h.state.now,expires_in:7200},h.env.TOKEN_ENCRYPTION_KEY));
   return h;
 }
+test('发布时去掉旧流程存下的链接：已审核通过、正文里带链接的稿子不会连链接一起发出',async()=>{
+  const h=await liveHarness();
+  const flow=await h.flow.getFlow(DAY);
+  await h.flow.s.put('flow:'+DAY,{...flow,formal:{...flow.formal,zh_post:flow.formal.zh_post+'\n\n交易记录：https://notion.example/ledger'}});
+  await h.flow.alarm();
+  const posted=h.log.x.find(c=>c.url.endsWith('/2/tweets'));
+  assert.equal(JSON.parse(posted.options.body).text.includes('notion.example'),false);
+});
 test('开关打开后：先传两张图再发一条带图推文，只发一次',async()=>{
   const h=await liveHarness();
   await Promise.all([h.flow.alarm(),h.flow.alarm()]);
@@ -387,7 +396,7 @@ test('开关打开后：先传两张图再发一条带图推文，只发一次',
   assert.deepEqual(urls,['https://api.x.com/2/users/me?user.fields=subscription,subscription_type,verified',
     'https://api.x.com/2/media/upload','https://api.x.com/2/media/upload','https://api.x.com/2/tweets']);
   const body=JSON.parse(h.log.x[3].options.body);
-  assert.equal(body.text,`【热币分析·第36期（${DAY}）】\n`+BODY+'\n\n交易记录：https://notion.example/ledger');
+  assert.equal(body.text,`【热币分析·第36期（${DAY}）】\n`+BODY);
   assert.equal(body.media.media_ids.length,2);
   assert.equal(h.log.downloads.length,2);
   assert.equal((await h.flow.getFlow(DAY)).slots.zh.tweet_id,'tw1');
@@ -558,4 +567,10 @@ test('同一天第二期：前一期发完后收起，新期号接着数；没�
   const next=await h.flow.getFlow(DAY);
   assert.equal(next.status,'poster_pending');
   assert.equal(next.rev,2);
+});
+
+test('帖子正文不带链接；旧流程里已存的链接发布时也会去掉',async()=>{
+  assert.equal(stripTradeLog('正文\n\n交易记录：https://n.example/x'),'正文');
+  assert.equal(stripTradeLog('body\n\nTrade log: https://n.example/x\n'),'body');
+  assert.equal(stripTradeLog('正文里提到 https://a.example 的不动'),'正文里提到 https://a.example 的不动');
 });
