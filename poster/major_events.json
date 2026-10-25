@@ -1,0 +1,269 @@
+{
+ "_说明": "周日清单里「本周行业活动」只列这里认得的大会/黑客松（日历里的活动重要度全是 1，没法自动排序）。match 是标题小写后的关键词，命中任意一个即算；exclude 命中就当作边会/酒会丢掉。新增大会只改这个文件。",
+ "exclude": [
+  "side event",
+  "cocktail",
+  "dinner",
+  "afterwork",
+  "after work",
+  "mixer",
+  "residency",
+  "networking",
+  "private",
+  "vip",
+  "panel",
+  "rave",
+  "gala",
+  "afterhours",
+  "lunch",
+  "night",
+  "institutional summit",
+  "onchain dev city",
+  "crypto mondays",
+  "cypherpunk",
+  "road to",
+  "founder",
+  "summit india"
+ ],
+ "conferences": [
+  {
+   "match": [
+    "swell"
+   ],
+   "zh": "Swell（Ripple 年会）",
+   "en": "Swell (Ripple)"
+  },
+  {
+   "match": [
+    "merge madrid"
+   ],
+   "zh": "MERGE Madrid",
+   "en": "MERGE Madrid"
+  },
+  {
+   "match": [
+    "zcon"
+   ],
+   "zh": "Zcon（Zcash）",
+   "en": "Zcon (Zcash)"
+  },
+  {
+   "match": [
+    "meridian"
+   ],
+   "zh": "Meridian",
+   "en": "Meridian"
+  },
+  {
+   "match": [
+    "labitconf"
+   ],
+   "zh": "LABITCONF",
+   "en": "LABITCONF"
+  },
+  {
+   "match": [
+    "btc balkans"
+   ],
+   "zh": "BTC Balkans",
+   "en": "BTC Balkans"
+  },
+  {
+   "match": [
+    "india blockchain week"
+   ],
+   "zh": "India Blockchain Week",
+   "en": "India Blockchain Week"
+  },
+  {
+   "match": [
+    "devcon"
+   ],
+   "zh": "Devcon（以太坊开发者大会）",
+   "en": "Devcon (Ethereum)",
+   "min_days": 3
+  },
+  {
+   "match": [
+    "token2049"
+   ],
+   "zh": "TOKEN2049",
+   "en": "TOKEN2049"
+  },
+  {
+   "match": [
+    "consensus"
+   ],
+   "zh": "Consensus",
+   "en": "Consensus"
+  },
+  {
+   "match": [
+    "ethdenver"
+   ],
+   "zh": "ETHDenver",
+   "en": "ETHDenver"
+  },
+  {
+   "match": [
+    "ethcc"
+   ],
+   "zh": "EthCC",
+   "en": "EthCC"
+  },
+  {
+   "match": [
+    "bitcoin 20",
+    "the bitcoin conference"
+   ],
+   "zh": "Bitcoin 大会",
+   "en": "Bitcoin Conference"
+  },
+  {
+   "match": [
+    "korea blockchain week",
+    "kbw"
+   ],
+   "zh": "Korea Blockchain Week",
+   "en": "Korea Blockchain Week"
+  },
+  {
+   "match": [
+    "solana breakpoint",
+    "breakpoint"
+   ],
+   "zh": "Solana Breakpoint",
+   "en": "Solana Breakpoint"
+  },
+  {
+   "match": [
+    "hong kong web3",
+    "web3 festival"
+   ],
+   "zh": "香港 Web3 嘉年华",
+   "en": "Hong Kong Web3 Festival"
+  },
+  {
+   "match": [
+    "permissionless"
+   ],
+   "zh": "Permissionless",
+   "en": "Permissionless"
+  },
+  {
+   "match": [
+    "bitcoin asia"
+   ],
+   "zh": "Bitcoin Asia",
+   "en": "Bitcoin Asia"
+  },
+  {
+   "match": [
+    "sigma world"
+   ],
+   "zh": "SiGMA World",
+   "en": "SiGMA World"
+  }
+ ],
+ "hackathons": [
+  {
+   "match": [
+    "arbitrum"
+   ],
+   "zh": "Arbitrum",
+   "en": "Arbitrum"
+  },
+  {
+   "match": [
+    "solana"
+   ],
+   "zh": "Solana",
+   "en": "Solana"
+  },
+  {
+   "match": [
+    "near"
+   ],
+   "zh": "NEAR",
+   "en": "NEAR"
+  },
+  {
+   "match": [
+    "ethglobal",
+    "eth global"
+   ],
+   "zh": "ETHGlobal",
+   "en": "ETHGlobal"
+  },
+  {
+   "match": [
+    "base "
+   ],
+   "zh": "Base",
+   "en": "Base"
+  },
+  {
+   "match": [
+    "sui "
+   ],
+   "zh": "Sui",
+   "en": "Sui"
+  },
+  {
+   "match": [
+    "hyperliquid"
+   ],
+   "zh": "Hyperliquid",
+   "en": "Hyperliquid"
+  },
+  {
+   "match": [
+    "bitcoin"
+   ],
+   "zh": "Bitcoin",
+   "en": "Bitcoin"
+  }
+ ],
+ "cities": {
+  "New York": "纽约",
+  "Madrid": "马德里",
+  "Cancún": "坎昆",
+  "Cancun": "坎昆",
+  "Lisbon": "里斯本",
+  "Buenos Aires": "布宜诺斯艾利斯",
+  "Sofia": "索非亚",
+  "Mumbai": "孟买",
+  "Dubai": "迪拜",
+  "Singapore": "新加坡",
+  "Bangkok": "曼谷",
+  "Hong Kong": "香港",
+  "Seoul": "首尔",
+  "Tokyo": "东京",
+  "Denver": "丹佛",
+  "Taipei": "台北",
+  "Istanbul": "伊斯坦布尔",
+  "Rome": "罗马",
+  "Roma": "罗马",
+  "Munich": "慕尼黑",
+  "München": "慕尼黑",
+  "London": "伦敦",
+  "Paris": "巴黎",
+  "Berlin": "柏林",
+  "Zürich": "苏黎世",
+  "Zurich": "苏黎世",
+  "Amsterdam": "阿姆斯特丹",
+  "Miami": "迈阿密",
+  "Las Vegas": "拉斯维加斯",
+  "San Francisco": "旧金山",
+  "Lugano": "卢加诺",
+  "Prague": "布拉格",
+  "Abu Dhabi": "阿布扎比",
+  "Bali": "巴厘岛",
+  "Brussels": "布鲁塞尔",
+  "Bogotá": "波哥大",
+  "Sydney": "悉尼",
+  "Vienna": "维也纳",
+  "Barcelona": "巴塞罗那",
+  "Cannes": "戛纳"
+ }
+}

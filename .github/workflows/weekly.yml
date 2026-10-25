@@ -1,0 +1,29 @@
+name: 热币交易 · 周日下周清单
+on:
+  schedule:
+    # UTC 07:17 = 北京时间周日 15:17：取日历、台账、收盘价，生成中英文帖子数据，送审后台；通过后 20:00 发布。
+    - cron: '17 7 * * 0'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: hotcoin-weekly
+  cancel-in-progress: false
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 安装依赖
+        run: python -m pip install -r pipeline/requirements.txt
+      - name: 取数、生成、送审
+        env:
+          WORKER_INGEST_URL: ${{ secrets.WORKER_INGEST_URL }}
+          PIPELINE_SECRET: ${{ secrets.PIPELINE_SECRET }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+        run: python pipeline/weekly_collect.py

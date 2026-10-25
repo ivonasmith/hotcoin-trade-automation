@@ -27,6 +27,9 @@ def html_set(payload):
 
 
 def render(payload, outdir, launch=None):
+    if payload.get("kind") == "weekly":   # 周日「下周清单」：2 张图（中、英各一张），单独的生成器
+        import weekend_gen
+        return weekend_gen.render(payload, outdir)
     htmls = html_set(payload)
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,1684 @@
+{
+ "today": "2026-10-25",
+ "generated_utc": "2026-10-25 01:13",
+ "data_status": {
+  "stale": false,
+  "detail": {
+   "btc_schedule": "ok（宏观日程录入到 2027-12-10）",
+   "Luma": "ok（8 条）",
+   "CryptoEvents": "ok（28 条）",
+   "IndustryEvents": "ok（19 条）",
+   "Web3Voyager": "ok（74 条）",
+   "CoinMarketCal": "未接入（没有 COINMARKETCAL_KEY）",
+   "Coindar": "未接入（没有 COINDAR_KEY）",
+   "代币解锁": "人工表 2 条 + 数据源 0 条"
+  },
+  "notes": []
+ },
+ "btc": {
+  "events": [
+   {
+    "type": "FOMC",
+    "date": "2026-10-28",
+    "days_until": 3,
+    "title_zh": "美联储议息决议",
+    "title_en": "FOMC rate decision",
+    "time_utc": "2026-10-28 18:00",
+    "time_bj": "2026-10-29 02:00",
+    "time_et": "14:00 ET",
+    "grade": "已验证·波动",
+    "tested": true,
+    "emphasis": true,
+    "what_zh": "2022 年以来 37 次，97% 的时候都比平时晃得厉害。公布后第二天涨的比例 49%，涨跌和抛硬币差不多，猜不出方向。",
+    "what_en": "Since 2022 (37 releases), wider than normal 97% of the time. Next day up 49% of the time — direction is a coin flip.",
+    "use_zh": "决议公布（北京时间 10-29 02:00）前后 2 小时不挂贴近现价的单、不加杠杆追单；不提前押方向。",
+    "use_en": "No resting orders near price and no leveraged chasing for 2 hours around the release (18:00 UTC). Don't bet on direction.",
+    "impact": {
+     "level_zh": "大",
+     "level_en": "High",
+     "text_zh": "公布那两个小时，BTC 最高价和最低价一般差 2.7%（约 $2,180），平时同一时段只有 1.1%；四次里有一次超过 3.8%，十次里有一次超过 6.3%（约 $5,080），2022 年以来最大一次 10.2%。全天最高到最低一般 4.2%（平时 3.4%）。",
+     "text_en": "In the 2 hours after the release, BTC's high-low range is typically 2.7% (normal: 1.1%); 1 in 4 times above 3.8%, 1 in 10 above 6.3%, largest since 2022 10.2%.",
+     "range_2h_typ_pct": 2.7,
+     "range_2h_big_pct": 6.3,
+     "range_2h_max_pct": 10.2,
+     "range_2h_normal_pct": 1.1,
+     "range_day_typ_pct": 4.2,
+     "range_day_normal_pct": 3.4,
+     "usd_typ": 2178,
+     "usd_big": 5083,
+     "price_ref": 80685
+    },
+    "stats": {
+     "n": 37,
+     "since": "2022-01",
+     "h2_ratio": 2.66,
+     "h2_share": 0.97,
+     "day_ratio": 1.33,
+     "next_day_ratio": 1.29,
+     "pre3_ratio": 1.08,
+     "up1_share": 0.49,
+     "up1_p": 1.0,
+     "old_era_h2_ratio": 1.2,
+     "h2_pct_med": 2.7,
+     "h2_pct_p75": 3.8,
+     "h2_pct_p90": 6.3,
+     "h2_pct_max": 10.2,
+     "h2_pct_normal": 1.1,
+     "move2h_pct_med": 1.1,
+     "move2h_pct_p90": 3.6,
+     "day_pct_med": 4.2,
+     "day_pct_p90": 8.6,
+     "day_pct_normal": 3.4
+    },
+    "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+   },
+   {
+    "type": "未检验",
+    "date": "2026-11-03",
+    "days_until": 9,
+    "title_zh": "美国中期选举",
+    "title_en": "US midterm elections",
+    "grade": "未检验",
+    "tested": false,
+    "emphasis": false,
+    "what_zh": "总统大选只有 3 个样本（2016、2020、2024，之后 30 天都上涨），中期选举没检验过。只提示，不改动作。",
+    "what_en": "Only 3 presidential elections in the sample; midterms untested. Shown for awareness only.",
+    "use_zh": "不改动作。",
+    "use_en": "No action."
+   },
+   {
+    "type": "NFP",
+    "date": "2026-11-06",
+    "days_until": 12,
+    "title_zh": "美国非农就业",
+    "title_en": "US nonfarm payrolls",
+    "time_utc": "2026-11-06 13:30",
+    "time_bj": "2026-11-06 21:30",
+    "time_et": "08:30 ET",
+    "grade": "已验证·波动",
+    "tested": true,
+    "emphasis": true,
+    "what_zh": "2022 年以来 57 次，79% 的时候都比平时晃得厉害。公布后第二天涨的比例 40%，涨跌和抛硬币差不多，猜不出方向。",
+    "what_en": "Since 2022 (57 releases), wider than normal 79% of the time. Next day up 40% of the time — direction is a coin flip.",
+    "use_zh": "数据公布（北京时间 11-06 21:30）前后 2 小时不挂贴近现价的单；当天整体波动不比平时大。",
+    "use_en": "No resting orders near price for 2 hours around the release (13:30 UTC); the day as a whole is not more volatile.",
+    "impact": {
+     "level_zh": "中",
+     "level_en": "Medium",
+     "text_zh": "公布那两个小时，BTC 最高价和最低价一般差 2.0%（约 $1,610），平时同一时段只有 1.3%；四次里有一次超过 2.5%，十次里有一次超过 3.0%（约 $2,420），2022 年以来最大一次 4.7%。全天最高到最低一般 3.9%（平时 4.0%）。",
+     "text_en": "In the 2 hours after the release, BTC's high-low range is typically 2.0% (normal: 1.3%); 1 in 4 times above 2.5%, 1 in 10 above 3.0%, largest since 2022 4.7%.",
+     "range_2h_typ_pct": 2.0,
+     "range_2h_big_pct": 3.0,
+     "range_2h_max_pct": 4.7,
+     "range_2h_normal_pct": 1.3,
+     "range_day_typ_pct": 3.9,
+     "range_day_normal_pct": 4.0,
+     "usd_typ": 1614,
+     "usd_big": 2421,
+     "price_ref": 80685
+    },
+    "stats": {
+     "n": 57,
+     "since": "2022-01",
+     "h2_ratio": 1.58,
+     "h2_share": 0.79,
+     "day_ratio": 0.9,
+     "next_day_ratio": 0.96,
+     "pre3_ratio": 1.05,
+     "up1_share": 0.4,
+     "up1_p": 0.185,
+     "old_era_h2_ratio": 1.07,
+     "h2_pct_med": 2.0,
+     "h2_pct_p75": 2.5,
+     "h2_pct_p90": 3.0,
+     "h2_pct_max": 4.7,
+     "h2_pct_normal": 1.3,
+     "move2h_pct_med": 0.8,
+     "move2h_pct_p90": 1.9,
+     "day_pct_med": 3.9,
+     "day_pct_p90": 7.5,
+     "day_pct_normal": 4.0
+    },
+    "source_url": "https://www.bls.gov/schedule/news_release/empsit.htm"
+   },
+   {
+    "type": "CPI",
+    "date": "2026-11-10",
+    "days_until": 16,
+    "title_zh": "美国 CPI",
+    "title_en": "US CPI",
+    "time_utc": "2026-11-10 13:30",
+    "time_bj": "2026-11-10 21:30",
+    "time_et": "08:30 ET",
+    "grade": "已验证·波动",
+    "tested": true,
+    "emphasis": true,
+    "what_zh": "2022 年以来 56 次，79% 的时候都比平时晃得厉害。公布后第二天涨的比例 54%，涨跌和抛硬币差不多，猜不出方向。",
+    "what_en": "Since 2022 (56 releases), wider than normal 79% of the time. Next day up 54% of the time — direction is a coin flip.",
+    "use_zh": "数据公布（北京时间 11-10 21:30）前后 2 小时不挂贴近现价的单、不加杠杆追单；不提前押方向。",
+    "use_en": "No resting orders near price and no leveraged chasing for 2 hours around the release (13:30 UTC). Don't bet on direction.",
+    "impact": {
+     "level_zh": "大",
+     "level_en": "High",
+     "text_zh": "公布那两个小时，BTC 最高价和最低价一般差 2.5%（约 $2,020），平时同一时段只有 1.3%；四次里有一次超过 3.5%，十次里有一次超过 4.9%（约 $3,950），2022 年以来最大一次 9.0%。全天最高到最低一般 4.6%（平时 3.5%）。",
+     "text_en": "In the 2 hours after the release, BTC's high-low range is typically 2.5% (normal: 1.3%); 1 in 4 times above 3.5%, 1 in 10 above 4.9%, largest since 2022 9.0%.",
+     "range_2h_typ_pct": 2.5,
+     "range_2h_big_pct": 4.9,
+     "range_2h_max_pct": 9.0,
+     "range_2h_normal_pct": 1.3,
+     "range_day_typ_pct": 4.6,
+     "range_day_normal_pct": 3.5,
+     "usd_typ": 2017,
+     "usd_big": 3954,
+     "price_ref": 80685
+    },
+    "stats": {
+     "n": 56,
+     "since": "2022-01",
+     "h2_ratio": 1.87,
+     "h2_share": 0.79,
+     "day_ratio": 1.33,
+     "next_day_ratio": 1.14,
+     "pre3_ratio": 1.17,
+     "up1_share": 0.54,
+     "up1_p": 0.689,
+     "old_era_h2_ratio": 0.97,
+     "h2_pct_med": 2.5,
+     "h2_pct_p75": 3.5,
+     "h2_pct_p90": 4.9,
+     "h2_pct_max": 9.0,
+     "h2_pct_normal": 1.3,
+     "move2h_pct_med": 1.2,
+     "move2h_pct_p90": 2.9,
+     "day_pct_med": 4.6,
+     "day_pct_p90": 8.1,
+     "day_pct_normal": 3.5
+    },
+    "source_url": "https://www.bls.gov/schedule/news_release/cpi.htm"
+   },
+   {
+    "type": "NFP",
+    "date": "2026-12-04",
+    "days_until": 40,
+    "title_zh": "美国非农就业",
+    "title_en": "US nonfarm payrolls",
+    "time_utc": "2026-12-04 13:30",
+    "time_bj": "2026-12-04 21:30",
+    "time_et": "08:30 ET",
+    "grade": "已验证·波动",
+    "tested": true,
+    "emphasis": true,
+    "what_zh": "2022 年以来 57 次，79% 的时候都比平时晃得厉害。公布后第二天涨的比例 40%，涨跌和抛硬币差不多，猜不出方向。",
+    "what_en": "Since 2022 (57 releases), wider than normal 79% of the time. Next day up 40% of the time — direction is a coin flip.",
+    "use_zh": "数据公布（北京时间 12-04 21:30）前后 2 小时不挂贴近现价的单；当天整体波动不比平时大。",
+    "use_en": "No resting orders near price for 2 hours around the release (13:30 UTC); the day as a whole is not more volatile.",
+    "impact": {
+     "level_zh": "中",
+     "level_en": "Medium",
+     "text_zh": "公布那两个小时，BTC 最高价和最低价一般差 2.0%（约 $1,610），平时同一时段只有 1.3%；四次里有一次超过 2.5%，十次里有一次超过 3.0%（约 $2,420），2022 年以来最大一次 4.7%。全天最高到最低一般 3.9%（平时 4.0%）。",
+     "text_en": "In the 2 hours after the release, BTC's high-low range is typically 2.0% (normal: 1.3%); 1 in 4 times above 2.5%, 1 in 10 above 3.0%, largest since 2022 4.7%.",
+     "range_2h_typ_pct": 2.0,
+     "range_2h_big_pct": 3.0,
+     "range_2h_max_pct": 4.7,
+     "range_2h_normal_pct": 1.3,
+     "range_day_typ_pct": 3.9,
+     "range_day_normal_pct": 4.0,
+     "usd_typ": 1614,
+     "usd_big": 2421,
+     "price_ref": 80685
+    },
+    "stats": {
+     "n": 57,
+     "since": "2022-01",
+     "h2_ratio": 1.58,
+     "h2_share": 0.79,
+     "day_ratio": 0.9,
+     "next_day_ratio": 0.96,
+     "pre3_ratio": 1.05,
+     "up1_share": 0.4,
+     "up1_p": 0.185,
+     "old_era_h2_ratio": 1.07,
+     "h2_pct_med": 2.0,
+     "h2_pct_p75": 2.5,
+     "h2_pct_p90": 3.0,
+     "h2_pct_max": 4.7,
+     "h2_pct_normal": 1.3,
+     "move2h_pct_med": 0.8,
+     "move2h_pct_p90": 1.9,
+     "day_pct_med": 3.9,
+     "day_pct_p90": 7.5,
+     "day_pct_normal": 4.0
+    },
+    "source_url": "https://www.bls.gov/schedule/news_release/empsit.htm"
+   },
+   {
+    "type": "FOMC",
+    "date": "2026-12-09",
+    "days_until": 45,
+    "title_zh": "美联储议息决议",
+    "title_en": "FOMC rate decision",
+    "time_utc": "2026-12-09 19:00",
+    "time_bj": "2026-12-10 03:00",
+    "time_et": "14:00 ET",
+    "grade": "已验证·波动",
+    "tested": true,
+    "emphasis": true,
+    "what_zh": "2022 年以来 37 次，97% 的时候都比平时晃得厉害。公布后第二天涨的比例 49%，涨跌和抛硬币差不多，猜不出方向。",
+    "what_en": "Since 2022 (37 releases), wider than normal 97% of the time. Next day up 49% of the time — direction is a coin flip.",
+    "use_zh": "决议公布（北京时间 12-10 03:00）前后 2 小时不挂贴近现价的单、不加杠杆追单；不提前押方向。",
+    "use_en": "No resting orders near price and no leveraged chasing for 2 hours around the release (19:00 UTC). Don't bet on direction.",
+    "impact": {
+     "level_zh": "大",
+     "level_en": "High",
+     "text_zh": "公布那两个小时，BTC 最高价和最低价一般差 2.7%（约 $2,180），平时同一时段只有 1.1%；四次里有一次超过 3.8%，十次里有一次超过 6.3%（约 $5,080），2022 年以来最大一次 10.2%。全天最高到最低一般 4.2%（平时 3.4%）。",
+     "text_en": "In the 2 hours after the release, BTC's high-low range is typically 2.7% (normal: 1.1%); 1 in 4 times above 3.8%, 1 in 10 above 6.3%, largest since 2022 10.2%.",
+     "range_2h_typ_pct": 2.7,
+     "range_2h_big_pct": 6.3,
+     "range_2h_max_pct": 10.2,
+     "range_2h_normal_pct": 1.1,
+     "range_day_typ_pct": 4.2,
+     "range_day_normal_pct": 3.4,
+     "usd_typ": 2178,
+     "usd_big": 5083,
+     "price_ref": 80685
+    },
+    "stats": {
+     "n": 37,
+     "since": "2022-01",
+     "h2_ratio": 2.66,
+     "h2_share": 0.97,
+     "day_ratio": 1.33,
+     "next_day_ratio": 1.29,
+     "pre3_ratio": 1.08,
+     "up1_share": 0.49,
+     "up1_p": 1.0,
+     "old_era_h2_ratio": 1.2,
+     "h2_pct_med": 2.7,
+     "h2_pct_p75": 3.8,
+     "h2_pct_p90": 6.3,
+     "h2_pct_max": 10.2,
+     "h2_pct_normal": 1.1,
+     "move2h_pct_med": 1.1,
+     "move2h_pct_p90": 3.6,
+     "day_pct_med": 4.2,
+     "day_pct_p90": 8.6,
+     "day_pct_normal": 3.4
+    },
+    "source_url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+   },
+   {
+    "type": "CPI",
+    "date": "2026-12-10",
+    "days_until": 46,
+    "title_zh": "美国 CPI",
+    "title_en": "US CPI",
+    "time_utc": "2026-12-10 13:30",
+    "time_bj": "2026-12-10 21:30",
+    "time_et": "08:30 ET",
+    "grade": "已验证·波动",
+    "tested": true,
+    "emphasis": true,
+    "what_zh": "2022 年以来 56 次，79% 的时候都比平时晃得厉害。公布后第二天涨的比例 54%，涨跌和抛硬币差不多，猜不出方向。",
+    "what_en": "Since 2022 (56 releases), wider than normal 79% of the time. Next day up 54% of the time — direction is a coin flip.",
+    "use_zh": "数据公布（北京时间 12-10 21:30）前后 2 小时不挂贴近现价的单、不加杠杆追单；不提前押方向。",
+    "use_en": "No resting orders near price and no leveraged chasing for 2 hours around the release (13:30 UTC). Don't bet on direction.",
+    "impact": {
+     "level_zh": "大",
+     "level_en": "High",
+     "text_zh": "公布那两个小时，BTC 最高价和最低价一般差 2.5%（约 $2,020），平时同一时段只有 1.3%；四次里有一次超过 3.5%，十次里有一次超过 4.9%（约 $3,950），2022 年以来最大一次 9.0%。全天最高到最低一般 4.6%（平时 3.5%）。",
+     "text_en": "In the 2 hours after the release, BTC's high-low range is typically 2.5% (normal: 1.3%); 1 in 4 times above 3.5%, 1 in 10 above 4.9%, largest since 2022 9.0%.",
+     "range_2h_typ_pct": 2.5,
+     "range_2h_big_pct": 4.9,
+     "range_2h_max_pct": 9.0,
+     "range_2h_normal_pct": 1.3,
+     "range_day_typ_pct": 4.6,
+     "range_day_normal_pct": 3.5,
+     "usd_typ": 2017,
+     "usd_big": 3954,
+     "price_ref": 80685
+    },
+    "stats": {
+     "n": 56,
+     "since": "2022-01",
+     "h2_ratio": 1.87,
+     "h2_share": 0.79,
+     "day_ratio": 1.33,
+     "next_day_ratio": 1.14,
+     "pre3_ratio": 1.17,
+     "up1_share": 0.54,
+     "up1_p": 0.689,
+     "old_era_h2_ratio": 0.97,
+     "h2_pct_med": 2.5,
+     "h2_pct_p75": 3.5,
+     "h2_pct_p90": 4.9,
+     "h2_pct_max": 9.0,
+     "h2_pct_normal": 1.3,
+     "move2h_pct_med": 1.2,
+     "move2h_pct_p90": 2.9,
+     "day_pct_med": 4.6,
+     "day_pct_p90": 8.1,
+     "day_pct_normal": 3.5
+    },
+    "source_url": "https://www.bls.gov/schedule/news_release/cpi.htm"
+   }
+  ]
+ },
+ "unlocks": {
+  "events": [
+   {
+    "date": "2026-10-29",
+    "symbol": "FF",
+    "name": "",
+    "usd_m": 27.38,
+    "pct_circ": null,
+    "amount": "",
+    "kind": "",
+    "kind_en": "",
+    "status": "forecast",
+    "hot": false,
+    "sources": [
+     {
+      "name": "KuCoin 十月解锁汇总（10-01 发布，Tokenomist 预测）",
+      "name_en": "KuCoin October unlock roundup (published Oct 1; Tokenomist forecast)",
+      "url": "https://www.kucoin.com/news/insight/HYPE/6abdb79b38a264000791fd68"
+     }
+    ],
+    "days_until": 4,
+    "important": true,
+    "reasons": [
+     "value"
+    ],
+    "watch": false
+   },
+   {
+    "date": "2026-11-01",
+    "symbol": "SUI",
+    "name": "Sui",
+    "usd_m": null,
+    "pct_circ": null,
+    "amount": "",
+    "kind": "社区储备（Community Reserve）",
+    "kind_en": "Community Reserve",
+    "status": "forecast",
+    "hot": false,
+    "sources": [
+     {
+      "name": "Tokenomist",
+      "name_en": "Tokenomist",
+      "url": "https://tokenomist.ai/sui"
+     }
+    ],
+    "days_until": 7,
+    "important": true,
+    "reasons": [
+     "watch"
+    ],
+    "watch": true
+   }
+  ]
+ },
+ "web3": {
+  "events": [
+   {
+    "date_start": "2026-10-26",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "2026 2nd International Symposium on Machine Learning and Social Computing (MLSC 2026)",
+    "coins": [],
+    "city": "Bangkok",
+    "importance": 1,
+    "source": "IndustryEvents",
+    "url": "https://www.industryevents.com/events/2026-2nd-international-symposium-on-machine-learning-and-social-computing-mlsc-2026-2",
+    "note": "",
+    "sources": [
+     "IndustryEvents"
+    ],
+    "days_until": 1,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-26",
+    "date_end": "2026-10-27",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Cypher Tank",
+    "coins": [],
+    "city": "Lugano",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/cypher-tank",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 1,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-26",
+    "date_end": "2026-10-26",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "El Encuentro",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/el-encuentro",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 1,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-26",
+    "date_end": "2026-10-26",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "The Mid-Chain DeFi Conference is a premier academic–industry summit dedicated to",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/mid-chain-defi-conference-2026/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 1,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Apex Invest Europe 2026",
+    "coins": [],
+    "city": "Zürich",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/apex-invest-europe-26-10-27",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "CBDC Conference 2026 Malaysia",
+    "coins": [],
+    "city": "Amsterdam",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/cbdc-conference-2026-malaysia-26-10",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-27",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "MERGE Institutional Summit & VIP Cocktail Dinner",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/merge-institutional-summit-vip-cocktail-dinner",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Merge Madrid 2026",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/merge-madrid-2026-eur",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "MoneyLIVE Nordic Banking | Nordic Banking Conference",
+    "coins": [],
+    "city": "København",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/moneylive-nordic-banking-nordic-banking-conference-26-10-27",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "ODSC AI West 2026",
+    "coins": [],
+    "city": "San Francisco, California",
+    "importance": 1,
+    "source": "IndustryEvents",
+    "url": "https://www.industryevents.com/events/odsc-ai-west-2026",
+    "note": "",
+    "sources": [
+     "IndustryEvents"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Ripple swell 2026",
+    "coins": [],
+    "city": "New York",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/ripple-swell-26-10",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Swell 2026",
+    "coins": [],
+    "city": "New York",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/swell-26-10-27",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-27",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Swell Institutional Summit",
+    "coins": [],
+    "city": "New York",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/swell-institutional-summit-26-10",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-27",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "The Tie hosts its annual The Bridge conference Oct 27, 2026, bringing together s",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/the-bridge-conference-2026/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-27",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Zcon 7",
+    "coins": [],
+    "city": "Cancún",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/zcon-7-26-10-27",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 2,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Beyond the Wallet: A Dinner on Stablecoin Spend, Cards & Global Payments",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/beyond-the-wallet-a-dinner-on-stablecoin-spend-cards--global-payments",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Bit2Me Side Event at MERGE Madrid 2026",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/bit2me-side-event-at-merge-madrid-2026",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-30",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Blockchain & Cryptocurrency Conference 2026",
+    "coins": [],
+    "city": "Las Palmas de Gran Canaria",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/blockchain-cryptocurrency-conference-b2c-26-10-28",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Cyber Revolution Summit Saudi 2026",
+    "coins": [],
+    "city": "Riyadh",
+    "importance": 1,
+    "source": "IndustryEvents",
+    "url": "https://www.industryevents.com/events/cyber-revolution-summit-saudi-2026",
+    "note": "",
+    "sources": [
+     "IndustryEvents"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Digital Finance Africa 2026",
+    "coins": [],
+    "city": "Sandton",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/digital-finance-africa-26-10-28",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-30",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "IEEE 2026 4th International Conference on Artificial Intelligence and Automation Control (AIAC 2026)",
+    "coins": [],
+    "city": "Shenzhen",
+    "importance": 1,
+    "source": "IndustryEvents",
+    "url": "https://www.industryevents.com/events/ieee-2026-4th-international-conference-on-artificial-intelligence-and-automation-control-aiac-2026",
+    "note": "",
+    "sources": [
+     "IndustryEvents"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "LBank Futures FIFA Cup & Checkmate Night",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/lbank-futures-fifa-cup--checkmate-night",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "La Velada Madrid",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/la-velada-madrid",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "MERGE VIP Cocktail Lunch",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/merge-vip-cocktail-lunch",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "MERGE x Optimism VIP Cocktail Lunch",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/merge-x-optimism-vip-cocktail-lunch",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Meridian 2026",
+    "coins": [],
+    "city": "Lisbon",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/meridian-2026",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Reental Afterwork",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/reental-afterwork",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Riserva Madrid | Stablecoins over wine at MERGE Madrid",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/riserva-madrid--stablecoins-over-wine-at-merge-madrid",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Shot for the Moon",
+    "coins": [],
+    "city": "Madonna del Piano",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/shot-for-the-moon",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "The Lending Room",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/the-lending-room",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-28",
+    "date_end": "2026-10-28",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Tritemius Side Event",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/tritemius-side-event",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 3,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-29",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "AWIC x MERGE Madrid: Panel & Networking",
+    "coins": [],
+    "city": "Madrid",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/awic-x-merge-madrid-panel--networking",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 4,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-29",
+    "date_end": "2026-10-30",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Crafting the Cryptoeconomy Conference returns on Oct 29–30, 2026 with research a",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/crafting-the-cryptoeconomy-conference-2026/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 4,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-29",
+    "date_end": "2026-10-29",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Link:NYC",
+    "coins": [],
+    "city": "New York",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/linknyc",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 4,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-29",
+    "date_end": "2026-10-31",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Oct 29-31 2026 TUM Blockchain Conference 2026 Munich The TUM Blockchain Conferen",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/tum-blockchain-conference-2026/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 4,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-29",
+    "date_end": "2026-10-31",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "TUM Blockchain Conference 26",
+    "coins": [],
+    "city": "München",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/tum-blockchain-conference-26-26-10-29",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 4,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-30",
+    "date_end": "2026-10-31",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "LABITCONF 26",
+    "coins": [],
+    "city": "Buenos Aires",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/labitconf-26-26-10-30",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 5,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-30",
+    "date_end": "2026-10-30",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "MIP-20: Road to Devcon",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/mip-20-road-devcon-26-10-30",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 5,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-30",
+    "date_end": "2026-10-31",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Oct 30-31 2026 LABITCONF 2026 Buenos Aires 40% OFF Buenos Aires LABITCONF 2026 g",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/labitconf-2026-buenos-aires/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 5,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-30",
+    "date_end": "2026-10-30",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Softstack TUM Blockchain Dinner",
+    "coins": [],
+    "city": "Munich",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/softstack-tum-blockchain-dinner-9-1792786088843",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 5,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-30",
+    "date_end": "2026-10-31",
+    "category": "黑客松",
+    "category_en": "Hackathon",
+    "title": "TUM Blockchain & AI Hackathon Oct 30–31, 2026 • Germany EUR Hackathon Multichain",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/tum-blockchain--ai-hackathon",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 5,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-31",
+    "date_end": "2026-12-06",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Arbitrum Open House Dubai: Online Buildathon Oct 31 – Dec 6, 2026 • 🏠 Your Home",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/arbitrum-open-house-dubai-26-10",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 6,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-31",
+    "date_end": "2026-11-01",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "BTC Balkans 2026",
+    "coins": [],
+    "city": "Sofia",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/btc-balkans-2026",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 6,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-10-31",
+    "date_end": "2026-10-31",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "India Blockchain Tour 2026 - Mumbai Node",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/india-blockchain-tour-mumbai-node-26-10-31",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 6,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-01",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Afterhours Mixer: Mumbai",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/afterhours-mixer-mumbai",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-01",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "BORN UP – India Blockchain Week Mumbai Community Networking Meetup",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/born-up-india-blockchain-week-mumbai-26-11-01",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-08",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Catalyst - Founder residency at Devcon",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/catalyst-founder-residency-devcon-26-11-01",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-12-01",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Cosmoverse 2026",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/cosmoverse-2026-apac",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "DeFi Security Summit 2026",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/defi-security-summit-26-11-01",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "DeFi Security Summit returns November 1-2 during Devcon week in Mumbai for two d",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/defi-security-summit-2026-mumbai/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "IBW Institutional Forum 2026",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/ibw-institutional-forum-26-11-01",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "India Blockchain Week 2026",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/india-blockchain-week-2026",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-14",
+    "category": "黑客松",
+    "category_en": "Hackathon",
+    "title": "NEAR Hackathon Nov 1–14, 2026 • 🏠 Your Home ONLINE Hackathon",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/near-hackathon",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Nov 1-2 2026 India Blockchain Week 2026 Conference Mumbai Held during Devcon Mum",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/india-blockchain-week-2026-conference/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-01",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Run & Rave",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/run-rave-26-11-01",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-08",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Shaktipith - Women only residency",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/shaktipith-women-only-residency-26-11-01",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-12",
+    "category": "黑客松",
+    "category_en": "Hackathon",
+    "title": "Solana Hacker House - London Nov 1–12, 2026 • United Kingdom EUR Hackathon",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/solana-hacker-house-london-26-11-01",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-12-01",
+    "category": "黑客松",
+    "category_en": "Hackathon",
+    "title": "W3 Node Nov 1 – Dec 1, 2026 • South Africa SSA Hackathon Multichain Next",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/w3-node-2026-ssa",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-01",
+    "date_end": "2026-11-01",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Zcash World - Mumbai",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/zcash-world---mumbai",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 7,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-06",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "AIBC World Rome 2026",
+    "coins": [],
+    "city": "Roma",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/aibc-world",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "ArbiVerse Mumbai",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/arbiverse-mumbai-26-11-02",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Crypto Mondays Devcon India Edition",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/crypto-mondays-devcon-india-edition-26-11-02",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-04",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Dubai FinTech Summit 2026",
+    "coins": [],
+    "city": "Dubai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/dubai-fintech-summit-2026",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Ethereum Cypherpunk Congress #3 – Mumbai",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/congress-mumbai-26-11-02",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-03",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Nov 2-3 2026 Dubai Fintech Summit 2026 Dubai Dubai FinTech Summit 2026, organise",
+    "coins": [],
+    "city": "",
+    "importance": 1,
+    "source": "CryptoEvents",
+    "url": "https://cryptoevents.global/dubai-fintech-summit-2026/",
+    "note": "",
+    "sources": [
+     "CryptoEvents"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Onchain Dev City - Devcon [8] INDIA 🇮🇳",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/onchain-dev-city-devcon-8-india-26-11-02",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-05",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "SiGMA World Summit Rome 2026",
+    "coins": [],
+    "city": "Roma",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/sigma-world-summit-rome",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Solana Summit India",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/solana-summit-india",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "Team1 India: Networking Gala Mumbai",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/team1-india-networking-gala-mumbai-26-11-02",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   },
+   {
+    "date_start": "2026-11-02",
+    "date_end": "2026-11-02",
+    "category": "会议",
+    "category_en": "Conference",
+    "title": "The Institutional Table: Private Dinner on Tokenization, Stablecoins and Security | Mumbai",
+    "coins": [],
+    "city": "Mumbai",
+    "importance": 1,
+    "source": "Web3Voyager",
+    "url": "https://web3voyager.com/event/institutional-table-private-dinner-tokenization-stablecoins-26-11-02",
+    "note": "",
+    "sources": [
+     "Web3Voyager"
+    ],
+    "days_until": 8,
+    "ongoing": false
+   }
+  ]
+ }
+}

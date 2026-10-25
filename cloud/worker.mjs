@@ -320,6 +320,29 @@ export class TradeDesk {
       await this.ctx.storage.put('snapshot:'+day,{...snapshot,received_at:Date.now()});
       return json({ok:true,day,received_at:Date.now()});
     }
+    if(path==='/pipeline/weekly' && request.method==='POST') {
+      const auth=request.headers.get('Authorization')||'';
+      if(!env.PIPELINE_SECRET || !auth.startsWith('Bearer ') || !await matches(auth.slice(7),env.PIPELINE_SECRET))
+        return json({ok:false},403);
+      if(Number(request.headers.get('Content-Length')||0)>400000) return json({ok:false,error:'数据包过大'},413);
+      const body=await request.json();
+      const day=beijingDay();
+      // The collector reports its own failure here so the reviewer hears about it instead of waiting for a post that will not come.
+      if(typeof body.error==='string' && body.day===day) {
+        if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
+        await telegram(env,'sendMessage',{chat_id:Number(env.TELEGRAM_OWNER_ID),
+          text:`周日下周清单没有生成，今天不会有送审稿。原因：${body.error.slice(0,500)}\n处理好后，到 GitHub 的 Actions 里手动运行「周日下周清单」即可补上。`});
+        return json({ok:true,reported:true});
+      }
+      const pack=body.pack;
+      if(body.day!==day || pack?.kind!=='weekly' || pack.day!==day) return json({ok:false,error:'日期不是今天，或数据包格式不对'},400);
+      if(typeof body.zh_post!=='string' || typeof body.en_post!=='string' || !body.zh_post.startsWith('【$BTC下周清单】')
+        || !body.en_post.startsWith('【$BTC Week Ahead】') || /[\u4e00-\u9fff]/.test(body.en_post))
+        return json({ok:false,error:'帖子文字不符合格式（标题或英文稿含中文）'},400);
+      if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
+      const result=await this.flow(env).startWeekly(day,{pack,zh_post:body.zh_post.trim(),en_post:body.en_post.trim()});
+      return json({ok:result.status===200,...result,status:undefined},result.status);
+    }
     if(path.startsWith('/pipeline/jobs/')) {
       const auth=request.headers.get('Authorization')||'';
       if(!env.PIPELINE_SECRET || !auth.startsWith('Bearer ') || !await matches(auth.slice(7),env.PIPELINE_SECRET))
@@ -509,6 +532,11 @@ export class TradeDesk {
       const day=beijingDay(),draft=await this.ctx.storage.get('draft:'+day);
       const flow=await this.ctx.storage.get('flow:'+day);
       const slots=flow?.slots?Object.entries(flow.slots).map(([lang,slot])=>`${lang==='zh'?'中文':'英文'}：${slot.status}`).join('，'):'';
+      if(!draft && flow?.kind==='weekly') {
+        const wslots=flow.slots?Object.entries(flow.slots).map(([lang,slot])=>`${lang==='zh'?'中文':'英文'}：${slot.status}`).join('，'):'';
+        await reply(`周日下周清单：${flow.status}${flow.failure?'；原因：'+flow.failure:''}${wslots?'\n发布安排：'+wslots:''}`);
+        return json({ok:true});
+      }
       await reply(draft?`今日送审稿状态：${draft.status}；模型：${draft.model}${flow?`\n正式流程：${flow.status}${flow.issue?`（第${flow.issue}期）`:''}${flow.failure?'；原因：'+flow.failure:''}${slots?'\n发布安排：'+slots:''}${flow.ledger_status?'\n台账：'+flow.ledger_status:''}`:''}`:'今天还没有送审稿。');
       return json({ok:true});
     }
@@ -622,7 +650,9 @@ export class TradeDesk {
     if(!fresh) return json({ok:true});
     const flow=this.flow(env);
     const draft=await this.ctx.storage.get('draft:'+day);
-    if(!draft) { await answer('找不到这份稿件'); return json({ok:true}); }
+    // The Sunday week-ahead has no text draft; only the text-review actions need one.
+    const weekly=(await this.ctx.storage.get('flow:'+day))?.kind==='weekly';
+    if(!draft && !weekly) { await answer('找不到这份稿件'); return json({ok:true}); }
     const move=(from,patch)=>this.ctx.storage.transaction(async tx=>{
       const current=await tx.get('draft:'+day);
       if(!current || current.status!==from) return false;
@@ -639,7 +669,7 @@ export class TradeDesk {
         await answer('已退回');
         await telegram(env,'sendMessage',{chat_id:chat,text:'已退回。发送修改要求后再发送 /draft；当前版本不会发推。'});
       } else await answer('该稿件已经处理');
-    } else if(action==='formal_retry' && draft.status==='text_approved') {
+    } else if(action==='formal_retry' && draft?.status==='text_approved') {
       await answer('重新处理中'); await flow.startFormal(day);
     } else if(action==='poster_retry') {
       await answer('重新排队'); await flow.retryPoster(day);
