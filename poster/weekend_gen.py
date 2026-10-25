@@ -47,46 +47,50 @@ TXT = {
   kicker="热币分析 · 周日 · {d} · 下周清单", title="下周清单", sub=DATA["week_zh"],
   t1v="10-29 02:00", t1l="美联储议息（北京时间）",
   t2v="±2 小时", t2l="公布前后波动一般更大",
-  t3v=DATA["acct_pct"], t3l="名义账户累计收益",
-  t4v="+${:.0f}".format(floating_total()), t4l="持仓浮盈（10-24 报价，未计入）",
+  t3v=DATA["acct_pct"], t3l="账户累计收益",
+  t4v="+${:.0f}".format(floating_total()), t4l="持仓浮盈（10-24 报价）",
   s1="下周大事件", s1b="外部风险",
   e1h="美联储议息决议", e1t="北京时间 10-29（周四）凌晨 2:00 · 美东 10-28 14:00",
   e1p="利率会议。我们的日历统计显示：公布前后两小时，BTC 的振幅一般比平时大，但往哪边走很难猜。",
   s2="该避开什么 · 该盯什么",
   avoid_h="避开", avoid=["10-29 凌晨 0:00–4:00（北京时间）不挂贴近现价的单", "不加杠杆去追这一晚的单边行情"],
   watch_h="盯住", watch=["议息当天的日线收盘在 10-29 早上 8:00（北京时间），先看收盘，不凭一根影线下结论", "已在场的单子，止损按收盘价判定，盘中扫一下不算"],
+  sc="币种事件 · 解锁", scn="解锁是潜在抛压，不是必跌信号；数量为预测值，以项目方公告为准。",
+  unl=[("10-29","FF 解锁","约 $27M"),("11-01","SUI 社区储备解锁","数量待核")],
   s3="本周行业活动", s3n="会议扎堆的一周，项目方爱在这几天放消息；会议本身不是交易信号，只是消息多发期。",
   hack_h="线上与黑客松",
   s4="本周总结", s4n=DATA["recap_zh"],
   r1="新增 3 张空单：SOL、XRP、BTC", r2="2 张成交（SOL、XRP，10-21），1 张 BTC 空单还在等价格",
   r3="1 张 ETH 空单没成交就撤了：成交前资金费率转负，这是挂单时就写好的撤单条件",
   r4="持仓：SOL 浮盈 +3.1R，XRP 浮盈 +3.7R（10-24 报价）；两张的止损都已下移到进场价之下，最差也是小赚。XRP 离目标价只差不到 1%，我们没有提前平仓，也不手动加减",
-  r5="已了结 {n} 笔，累计 {c}，账户收益 {p}。本周没有新平仓的单，浮盈在平仓前都不算数。",
+  r5="已了结 {n} 笔，累计 {c}，账户收益 {p}。本周没有新平仓的单。",
   honest="名义账户，不是作者真实持仓；浮盈不等于落袋；已了结样本只有 {n} 笔，别当成稳赚。",
-  foot="名义账户，不代表作者真实持仓｜浮盈在平仓前不计入战绩｜止损一律按收盘价判定｜不构成投资建议",
-  sig=SIGNATURE, src="日历数据：uncleonchain.com/calendar", unit_d="天"),
+  foot="口径：$10,000 起始，每笔 $2,000，2 倍杠杆｜止损一律按收盘价判定｜不构成投资建议",
+  sig=SIGNATURE, src="日历数据：uncleonchain.com/calendar · 解锁数据：Tokenomist（预测值）", unit_d="天"),
  "en": dict(
   kicker="Hot Coin Desk · Sunday · {d} · Week Ahead", title="Week Ahead", sub=DATA["week_en"],
   t1v="Oct 29 02:00", t1l="Fed decision (Beijing time)",
   t2v="±2 hours", t2l="Swings usually larger around release",
-  t3v=DATA["acct_pct"], t3l="Paper account, since launch",
-  t4v="+${:.0f}".format(floating_total()), t4l="Open profit (Oct 24 prices, not booked)",
+  t3v=DATA["acct_pct"], t3l="Account return since launch",
+  t4v="+${:.0f}".format(floating_total()), t4l="Open profit (Oct 24 prices)",
   s1="Biggest event next week", s1b="External risk",
   e1h="Fed rate decision", e1t="Thu Oct 29, 02:00 Beijing · Wed Oct 28, 2:00 pm ET",
   e1p="Rate meeting. In our calendar stats, BTC's range in the two hours around the release is usually wider than normal, but the direction is hard to call.",
   s2="What to avoid · What to watch",
   avoid_h="Avoid", avoid=["No limit orders close to price from 00:00 to 04:00 on Oct 29 (Beijing time)", "Don't chase a one-way move that night with leverage"],
   watch_h="Watch", watch=["The daily close for decision day is 8:00 am Oct 29 Beijing time. Read the close, not a single wick", "Open positions: stops are judged on the close; an intraday poke doesn't count"],
+  sc="Token events · Unlocks", scn="An unlock is potential sell pressure, not a sure drop. Amounts are forecasts; check the project's own announcement.",
+  unl=[("Oct 29","FF unlock","~$27M"),("Nov 1","SUI Community Reserve unlock","Amount TBC")],
   s3="Industry events this week", s3n="A crowded conference week means projects tend to time announcements. A conference is not a trade signal, just a busier news cycle.",
   hack_h="Online and hackathons",
   s4="Weekly recap", s4n=DATA["recap_en"],
   r1="3 new short orders: SOL, XRP, BTC", r2="2 filled (SOL, XRP on Oct 21); the BTC short is still waiting for price",
   r3="1 ETH short was cancelled unfilled: funding turned negative before the fill, a cancel condition written when the order was posted",
   r4="Open: SOL +3.1R, XRP +3.7R (Oct 24 prices). Both stops are already below entry (shorts), so the worst case is a small win. XRP is within 1% of target and we did not close early or tinker by hand",
-  r5="{n} closed trades, cumulative {c}, account return {p}. Nothing was closed this week, and open profit doesn't count until it is closed.",
+  r5="{n} closed trades, cumulative {c}, account return {p}. Nothing was closed this week.",
   honest="Paper account, not the author's real positions. Open profit is not banked. Only {n} closed trades so far, so don't read this as a sure thing.",
-  foot="Paper account, not the author's real positions | Open profit not counted until closed | Stops judged on the close | Not investment advice",
-  sig=SIGNATURE_EN, src="Calendar data: uncleonchain.com/calendar", unit_d="d"),
+  foot="Basis: $10,000 start, $2,000 per trade, 2x leverage | Stops judged on the close | Not investment advice",
+  sig=SIGNATURE_EN, src="Calendar: uncleonchain.com/calendar · Unlocks: Tokenomist (forecast)", unit_d="d"),
 }
 
 CSS = """
@@ -145,6 +149,7 @@ def build(lang):
         f'<tr><td class="d">{d}</td><td>{(zn if z else en)}</td><td class="c">{(zc if z else ec)}</td></tr>'
         for d, zn, en, zc, ec in EVENTS)
     hack_rows = "".join(f'<tr><td class="d">{d}</td><td colspan="2">{(a if z else b)}</td></tr>' for d, a, b in HACK)
+    unl_rows = "".join(f'<tr><td class="d">{d}</td><td>{n}</td><td class="c">{v}</td></tr>' for d, n, v in t['unl'])
     li = lambda xs: "".join(f"<li>{x}</li>" for x in xs)
     sums = [t["r1"], t["r2"], t["r3"], t["r4"], t["r5"].format(n=DATA["closed_n"], c=DATA["acct_cum"], p=DATA["acct_pct"])]
     return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><style>{CSS}</style></head><body>
@@ -163,6 +168,8 @@ def build(lang):
 <div class="sec"><div class="sech"><span class="t">{t['s2']}</span></div>
  <div class="two"><div class="box a"><h3>{t['avoid_h']}</h3><ul>{li(t['avoid'])}</ul></div>
  <div class="box w"><h3>{t['watch_h']}</h3><ul>{li(t['watch'])}</ul></div></div></div>
+<div class="sec"><div class="sech"><span class="t">{t['sc']}</span></div>
+ <table class="ev">{unl_rows}</table><div class="note">{t['scn']}</div></div>
 <div class="sec"><div class="sech"><span class="t">{t['s3']}</span></div>
  <table class="ev">{ev_rows}</table>
  <div style="font-size:22px;font-weight:700;color:var(--brown);margin-top:16px">{t['hack_h']}</div>
@@ -170,7 +177,7 @@ def build(lang):
  <div class="note">{t['s3n']}</div></div>
 <div class="sec"><div class="sech"><span class="t">{t['s4']}</span><span class="n">{t['s4n']}</span></div>
  <div class="card gold"><ul class="sum">{li(sums)}</ul></div>
- <div class="honest">{t['honest'].format(n=DATA['closed_n'])}</div></div>
+</div>
 <div class="foot"><div class="l">{t['foot']}<br>{t['src']}</div><div class="r"><div class="s">{t['sig']}</div><div class="h">{HANDLE}</div></div></div>
 </div></body></html>"""
 
