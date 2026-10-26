@@ -30,10 +30,13 @@ function harness({env={},now=Date.parse(DAY+'T10:00:00+08:00')}={}) {
         return {ok:true,result:{message_id:200+log.telegram.length}};
       }
       return {ok:true};},
-    tgChannelPhoto:async(e,chat,name,bytes,caption)=>{
-      if(state.photoError) throw state.photoError;
+    tgChannelPhoto:async(e,chat,name,bytes,caption,opts={})=>{
+      if(state.photoError && !opts.asDocument) throw state.photoError;
+      if(opts.asDocument && state.hdError) throw state.hdError;
+      if(opts.asDocument || state.realPhoto) log.sends=[...(log.sends||[]),{asDocument:Boolean(opts.asDocument),replyTo:opts.replyTo,name,caption}];
+      if(opts.asDocument) return {ok:true,result:{message_id:78,document:{file_id:'d'}}};
       log.photos.push({chat,name,size:bytes.byteLength,caption});
-      return {ok:true,result:{message_id:77}};},
+      return {ok:true,result:{message_id:77,...(state.realPhoto?{photo:[{file_id:'p'}]}:{})}};},
     tgUpload:async()=>({result:{document:{file_id:'x'}}}),
     tgDownload:async(e,id)=>{log.downloads.push(id);return new Uint8Array(3000);},
     translate:async()=>{throw Error('不翻译');},
@@ -93,6 +96,39 @@ test('到点：竖版海报带正文做说明一条发出，不碰 X；闹钟重
   assert.ok(sent(h).some(t=>t.includes('https://t.me/UncleOnchain/77')));
 });
 
+test('照片被压缩会糊：真发成照片后，紧接着在它下面补一份未压缩原图文件；已经是文件的不再补',async()=>{
+  const h=harness();
+  h.state.realPhoto=true;
+  await seedDaily(h);
+  await h.flow.schedule(DAY);
+  h.state.now=dueAt(DAY,'zh')+10000;
+  await h.flow.alarm();
+  assert.equal(h.log.photos.length,1);
+  assert.deepEqual(h.log.sends.map(x=>[x.asDocument,x.replyTo,x.name]),[[false,undefined,'zh_m.png'],[true,77,'zh_m.png']]);
+  assert.ok(h.log.sends[1].caption.includes('高清原图'));
+  assert.equal((await h.flow.getFlow(DAY)).slots.zh.status,'posted');
+  const plain=harness();   // poster too large for a photo: it already went out as the original file
+  await seedDaily(plain);
+  await plain.flow.schedule(DAY);
+  plain.state.now=dueAt(DAY,'zh')+10000;
+  await plain.flow.alarm();
+  assert.equal(plain.log.sends,undefined);
+});
+test('高清文件发送失败（5xx）：图不重发，确认后重发只补高清文件',async()=>{
+  const h=harness();
+  h.state.realPhoto=true;h.state.hdError=Object.assign(Error('boom'),{status:502});
+  await seedDaily(h);
+  await h.flow.schedule(DAY);
+  h.state.now=dueAt(DAY,'zh')+10000;
+  await h.flow.alarm();
+  assert.equal(h.log.photos.length,1);
+  assert.equal((await h.flow.getFlow(DAY)).slots.zh.status,'unknown');
+  h.state.hdError=null;
+  await h.flow.retryPost(DAY,'zh');
+  assert.equal(h.log.photos.length,1);
+  assert.equal(h.log.sends.filter(x=>x.asDocument).length,1);
+  assert.equal((await h.flow.getFlow(DAY)).slots.zh.status,'posted');
+});
 test('正文超过 1024 字：先发图，再把正文作为第二条消息发到频道',async()=>{
   const h=harness();
   await seedDaily(h,{zh:ZH_LONG});

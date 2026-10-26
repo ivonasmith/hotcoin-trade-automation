@@ -25,6 +25,7 @@ const LANG_NAME={zh:'中文',en:'英文'};
 const TIME_TEXT={zh:'20:00',en:'21:00'};
 const MAX_UPLOAD=15*1024*1024;
 // Sunday: ONE X post carrying both posters (zh + en) with this fixed bilingual caption; the posters hold all the content.
+const HD_CAPTION={zh:'高清原图（点开不糊，可保存）',en:'HD original (tap to open, save-ready)'};
 export const WEEKLY_CAPTION='【$BTC\n\n下周的交易计划和大事前瞻来了，速看！ 👇\nThe week ahead plan is coming. Let\'s dive in! 👇】';
 const TARGET_NAME={x:'X',tg:'TG频道'};
 const TG_CAPTION_MAX=1024,TG_TEXT_MAX=4096;
@@ -536,6 +537,16 @@ export class Flow {
       const bytes=await this.d.tgDownload(this.env,flow.files[key].file_id);
       const res=await this.d.tgChannelPhoto(this.env,channel,flow.names[key],bytes,inCaption?text:'');
       done.photo=res?.result?.message_id||true;
+      // Telegram shrinks photos to ~1280px, so a tall phone poster turns blurry when opened. Only a real photo needs the
+      // original file under it; a poster too big for a photo already went out as the original file.
+      if(Array.isArray(res?.result?.photo)) done.hd_needed=true;
+      await save();
+    }
+    if(done.hd_needed && !done.hd) {
+      const bytes=await this.d.tgDownload(this.env,flow.files[key].file_id);
+      const res=await this.d.tgChannelPhoto(this.env,channel,flow.names[key],bytes,HD_CAPTION[lang]||HD_CAPTION.zh,
+        {asDocument:true,replyTo:Number.isInteger(done.photo)?done.photo:undefined});
+      done.hd=res?.result?.message_id||true;
       await save();
     }
     if(!inCaption && !done.text) {

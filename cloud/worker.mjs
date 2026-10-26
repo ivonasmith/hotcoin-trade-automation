@@ -159,12 +159,15 @@ export function photoOk(bytes) {
   if(!size || !size.w || !size.h || bytes.byteLength>10*1024*1024) return false;
   return size.w+size.h<=10000 && Math.max(size.w,size.h)/Math.min(size.w,size.h)<=20;
 }
-async function telegramChannelPhoto(env,chat,name,bytes,caption) {
+// opts.asDocument sends the untouched PNG as a file (Telegram recompresses photos to ~1280px, which looks blurry on a phone);
+// opts.replyTo attaches it under the photo post.
+async function telegramChannelPhoto(env,chat,name,bytes,caption,opts={}) {
   if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
-  const asPhoto=photoOk(bytes);
+  const asPhoto=!opts.asDocument && photoOk(bytes);
   const form=new FormData();
   form.append('chat_id',String(chat));
   if(caption) form.append('caption',caption);
+  if(opts.replyTo) form.append('reply_to_message_id',String(opts.replyTo));
   form.append(asPhoto?'photo':'document',new Blob([bytes],{type:'image/png'}),name);
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${asPhoto?'sendPhoto':'sendDocument'}`,{method:'POST',body:form},60000);
 }
