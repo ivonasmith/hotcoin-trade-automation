@@ -248,7 +248,9 @@ async function apiNebulaDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPro
   const request={
     method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
     body:JSON.stringify({model,max_tokens:4000,
-      messages:[{role:'system',content:system},{role:'user',content:promptFn(hotspots)}]})};
+      // The gateway forwards to Claude's native API, which rejects a system-role message (HTTP 400, 2026-10-26).
+      // The rules therefore ride at the top of the single user message instead.
+      messages:[{role:'user',content:`以下是你必须遵守的工作规则：\n\n${system}\n\n==========\n以下是今天的输入：\n\n${promptFn(hotspots)}`}]})};
   // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
   const result=await withRetry(async()=>{
     const answer=await provider('https://apinebula.ai/v1/chat/completions',request,45000);

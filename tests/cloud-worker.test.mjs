@@ -260,7 +260,9 @@ test('大快照先压缩再给模型，且提示词标注已压缩',async()=>{
   try {
     const response=await desk.makeDraft(123,desk.env);
     assert.equal(response.status,200);
-    const prompt=calls.nebula[0].messages[1].content;
+    assert.equal(calls.nebula[0].messages.length,1);
+    assert.equal(calls.nebula[0].messages.some(m=>m.role==='system'),false,'网关不接受system角色');
+    const prompt=calls.nebula[0].messages[0].content;
     assert.equal(prompt.length<70000,true);
     assert.equal(prompt.includes('体积已压缩'),true);
     assert.equal(prompt.includes('L1：偏多'),true);
