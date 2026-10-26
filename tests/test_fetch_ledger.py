@@ -89,3 +89,31 @@ class LedgerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClosedStatsTests(unittest.TestCase):
+    HEAD = ["期号", "发布日", "标的", "档位", "方向", "仓位", "进场", "止损", "目标", "状态", "成交日", "平仓价", "币价盈亏", "账户盈亏", "备注"]
+
+    def trade(self, issue, symbol, status, usd):
+        return [issue, "d", symbol, "", "", "", "", "", "", status, "", "", "", usd, ""]
+
+    def test_wins_losses_and_worst_loss(self):
+        table = [self.HEAD, self.trade("17", "ETH", "已了结", "+50.8 美元"), self.trade("5", "PUMP", "已了结", "-116.8 美元"),
+                 self.trade("1", "BTW", "已了结", "-235.6 美元"), self.trade("32", "DOGE", "公开作废", "—")]
+        stats = module.build_closed_stats(table, [], 3)
+        self.assertEqual(stats, {"wins": 1, "losses": 2, "worst_loss_usd": -235.6})
+
+    def test_log_closes_are_added_without_double_counting(self):
+        table = [self.HEAD, self.trade("17", "ETH", "已了结", "+50.8 美元")]
+        log = [{"变更": "止损了结", "期号": "17", "标的": "ETH", "账户盈亏": "+50.8 美元"},
+               {"变更": "止损了结", "期号": "36", "标的": "SOL", "账户盈亏": "-5.4 美元"}]
+        self.assertEqual(module.build_closed_stats(table, log, 2), {"wins": 1, "losses": 1, "worst_loss_usd": -5.4})
+
+    def test_count_mismatch_gives_nothing_instead_of_a_guess(self):
+        table = [self.HEAD, self.trade("17", "ETH", "已了结", "+50.8 美元")]
+        self.assertIsNone(module.build_closed_stats(table, [], 17))
+        self.assertIsNone(module.build_closed_stats(table, [], 0))
+
+    def test_no_losses(self):
+        table = [self.HEAD, self.trade("17", "ETH", "已了结", "+50.8 美元")]
+        self.assertEqual(module.build_closed_stats(table, [], 1)["worst_loss_usd"], None)

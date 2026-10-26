@@ -138,6 +138,7 @@ def build_ledger(sections):
         if len(row) >= 14 and row[9] == "已了结":
             closed_recent.append({"issue": row[0], "symbol": row[2], "pct": row[12], "usd": usd_text(row[13])})
     closed_recent = [item for item in closed_recent if item["pct"][:1] in "+-"][:6]
+    closed_stats = build_closed_stats(find("三、"), log, int(to_number(summary.get("已了结笔数")) or 0))
     updated = re.search(r"\d{4}-\d{2}-\d{2}", summary.get("更新至", ""))
     issue = re.search(r"第\s*(\d+)\s*期", summary.get("更新至", ""))
     counts = {"closed": int(to_number(summary.get("已了结笔数")) or 0),
@@ -148,8 +149,36 @@ def build_ledger(sections):
             "updated_issue": int(issue.group(1)) if issue else None,
             "equity_usd": to_number(summary.get("当前账户资金")),
             "cumulative_pnl_usd": to_number(summary.get("累计盈亏")),
-            "counts": counts, "closed_recent": closed_recent, "log_entries": len(log),
+            "counts": counts, "closed_recent": closed_recent, "closed_stats": closed_stats, "log_entries": len(log),
             "active": active}
+
+
+def usd_value(text):
+    """'+50.8 美元' / '-235.6 USD' -> 50.8 / -235.6; anything else -> None."""
+    match = re.search(r"([+-]?\d[\d,]*\.?\d*)", text or "")
+    return float(match.group(1).replace(",", "")) if match else None
+
+
+def build_closed_stats(table, log, expected):
+    """已了结笔数里赚几笔、亏几笔、最大一笔亏损。表三（已了结行）加状态变更记录里的止损了结，按（期号，标的）去重。
+    笔数和汇总页的「已了结笔数」对不上就不给（None）：拿不到可信的数就不报，宁可缺也不编。"""
+    trades = {}
+    for row in (table or [])[1:]:
+        if len(row) >= 14 and row[9] == "已了结":
+            value = usd_value(row[13])
+            if value is not None:
+                trades.setdefault((row[0], row[2]), value)
+    for entry in log:
+        if entry.get("变更") == "止损了结":
+            value = usd_value(entry.get("账户盈亏"))
+            if value is not None:
+                trades.setdefault((entry.get("期号"), entry.get("标的")), value)
+    if not expected or len(trades) != expected:
+        return None
+    values = list(trades.values())
+    losses = [v for v in values if v < 0]
+    return {"wins": sum(1 for v in values if v > 0), "losses": len(losses),
+            "worst_loss_usd": min(losses) if losses else None}
 
 
 def usd_text(text):

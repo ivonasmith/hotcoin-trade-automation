@@ -267,6 +267,8 @@ export function recordBlock(ledger) {
     const ret=base?cum/base*100:null;
     lines.push(`已了结 ${ledger.counts.closed} 笔，累计盈亏 ${usd(cum)}${ret===null?'':`，账户收益 ${ret>=0?'+':''}${ret.toFixed(2)}%`}（更新到 ${ledger.updated_to||'未知'}）。`);
   }
+  const stats=ledger.closed_stats;
+  if(stats) lines.push(`这${ledger.counts.closed}笔里赚了 ${stats.wins} 笔、亏了 ${stats.losses} 笔${stats.worst_loss_usd===null?'':`，最大一笔亏损 ${usd(stats.worst_loss_usd)}`}（这些亏损都在公开台账里，一张没删）。`);
   lines.push(`目前在手 ${ledger.counts.open} 张、挂单 ${ledger.counts.pending} 张。`);
   const recent=(ledger.closed_recent||[]).slice(0,3);
   if(recent.length) lines.push('最近了结（新到旧）：'+recent.map(item=>`$${item.symbol} 第${item.issue}期 币价${item.pct}，账户${item.usd}`).join('；'));
