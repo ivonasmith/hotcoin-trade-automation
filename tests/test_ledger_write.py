@@ -135,6 +135,23 @@ class LedgerWriteTest(unittest.TestCase):
         self.assertEqual(lw.apply_fills(fills, "2026-10-21", call=self.fake.call, page_url=URL), [])
         self.assertEqual(mutations(self.fake), count, "重复运行不重复写")
 
+    def test_unattended_stop_move_is_a_log_row_only_and_the_reader_sees_it(self):
+        fills = [{"type": "fill", "issue": "36", "symbol": "SOL", "date": "2026-10-21", "text": "x"}]
+        lw.apply_fills(fills, "2026-10-21", call=self.fake.call, page_url=URL)
+        before_active, summary_before = copy.deepcopy(self.table("二、")), self.summary()
+        move = [{"type": "stop_move", "issue": "36", "symbol": "SOL", "date": "2026-10-25", "price": 105.61, "text": "x"}]
+        self.assertEqual(lw.apply_fills(move, "2026-10-26", call=self.fake.call, page_url=URL), ["第36期SOL止损上移"])
+        self.assertEqual(self.table("二、"), before_active, "发布的止损一列不改")
+        self.assertEqual(self.summary(), summary_before, "计数器和更新至都不动")
+        row = self.table("六、")[-1]
+        self.assertEqual((row[3], row[4]), ("止损上移", "105.61"))
+        ledger = fl.fetch_ledger(URL, "t", lambda path, token: self.fake.call("GET", path))
+        sol = next(r for r in ledger["active"] if r["symbol"] == "SOL")
+        self.assertEqual((sol["status"], sol["stop_now"], sol["filled"]), ("持仓中", 105.61, "2026-10-21"))
+        count = mutations(self.fake)
+        self.assertEqual(lw.apply_fills(move, "2026-10-26", call=self.fake.call, page_url=URL), [])
+        self.assertEqual(mutations(self.fake), count, "重复运行不重复写")
+
     def test_issue_time_job_after_unattended_fill_does_not_double_count(self):
         fill = [{"type": "fill", "issue": "35", "symbol": "ETH", "date": "2026-10-21", "text": "x"}]
         lw.apply_fills(fill, "2026-10-21", call=self.fake.call, page_url=URL)

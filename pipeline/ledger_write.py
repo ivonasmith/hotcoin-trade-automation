@@ -22,7 +22,7 @@ import fetch_ledger as fl  # noqa: E402
 
 LOG_TITLE = "六、状态变更记录"
 LOG_NOTE = "程序自动追加，只加不改：成交、作废、过期、止损了结都记在这里，上面各表里的原始记录保持不动。"
-KINDS = {"fill": "成交", "cancel": "公开作废", "expire": "过期作废", "stop_out": "止损了结"}
+KINDS = {"fill": "成交", "cancel": "公开作废", "expire": "过期作废", "stop_out": "止损了结", "stop_move": "止损上移"}
 BASE_USD = 2000
 
 
@@ -158,6 +158,7 @@ def summary_editor(page, call):
     return rows, num, put
 
 
+AUTO_KINDS = ("fill", "stop_move")   # market facts / registered mechanical rules the daily job may write unattended
 COUNTERS = {"已了结笔数": "closed", "持仓中笔数": "open", "挂单未成交": "pending", "公开作废": "cancel", "过期未成交": "expire"}
 
 
@@ -209,6 +210,11 @@ def status_entries(day, proposals, active_rows):
             deltas = {"pending": -1, "cancel": 1}
         elif kind == "expire":
             deltas = {"pending": -1, "expire": 1}
+        elif kind == "stop_move":
+            moved = item.get("price")
+            if not moved:
+                continue
+            price = plain_number(moved)   # log row only: no counters, the published stop column is never edited
         elif kind == "stop_out":
             close = item.get("price")
             if not (close and entry and size):
@@ -319,7 +325,7 @@ def apply_fills(proposals, day, token=None, call=None, page_url=None):
     log_info = page.section("六、")
     log_keys = {r["text"][8] for r in (log_info["rows"][1:] if log_info else []) if len(r["text"]) > 8}
     summary_text = (find_row(page.section("一、")["rows"], {0: "更新至"}) or {"text": ["", ""]})["text"][1]
-    fills = [p for p in proposals if p.get("type") == "fill"]
+    fills = [p for p in proposals if p.get("type") in AUTO_KINDS]
     entries = [e for e in status_entries(day, fills, active["rows"]) if e["key"] not in log_keys]
     if not entries:
         return []

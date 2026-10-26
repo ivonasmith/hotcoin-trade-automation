@@ -1,6 +1,6 @@
 """Daily collection step: record fills in the Notion ledger as soon as the price has traded through the entry.
 
-Runs after fetch_ledger.py and ledger_sync.py. It writes only 'fill' proposals (see ledger_write.apply_fills), then
+Runs after fetch_ledger.py and ledger_sync.py. It writes only 'fill' and 'stop_move' (2R/3R mechanical stop moves) proposals (see ledger_write.apply_fills), then
 re-reads the ledger and re-runs the check so the uploaded snapshot already shows the position as held. Never blocks
 the snapshot upload: any failure is a warning and the snapshot goes up with the fill still listed as a proposal
 (the poster draws those as held too).
@@ -20,14 +20,16 @@ def main(runtime="runtime"):
     path = Path(runtime) / "ledger.json"
     try:
         ledger = json.loads(path.read_text())
-        fills = [p for p in (ledger.get("proposals") or []) if p.get("type") == "fill"] if ledger.get("ok") else []
+        wanted = [p for p in (ledger.get("proposals") or []) if p.get("type") in ("fill", "stop_move")] if ledger.get("ok") else []
+        fills = [p for p in wanted if p.get("type") == "fill"]
+        moves = [p for p in wanted if p.get("type") == "stop_move"]
         # A touch on the publish day itself may have happened BEFORE the order was published (daily bars cannot tell),
         # and the ledger has precedents both ways, so those stay for a human; only later days are unambiguous.
         published = {(str(r.get("issue")), r.get("symbol")): r.get("day") for r in ledger.get("active") or []}
         held_back = [p for p in fills if str(p.get("date") or "") <= str(published.get((str(p.get("issue")), p.get("symbol"))) or "")]
         for item in held_back:
             print("::notice title=发布当天触及，未自动记成交::" + str(item.get("text", ""))[:200].replace("%", "%25"), flush=True)
-        fills = [p for p in fills if p not in held_back]
+        fills = [p for p in fills if p not in held_back] + moves
         if not fills:
             return 0
         token = os.environ.get("NOTION_TOKEN") or os.environ.get("NOTION_API_KEY") or ""

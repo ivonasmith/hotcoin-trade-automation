@@ -28,6 +28,36 @@ def _to_date(text):
         return None
 
 
+def sig6(value):
+    return float(f"{value:.6g}")
+
+
+def stop_move(row, done, short, entry, stop, live):
+    """The two mechanical rules registered with every order: 2R reached on a daily close -> stop to the entry price;
+    3R reached -> stop follows MA20 (never beyond the entry price). The stop only moves toward profit, and never to a
+    level the last close has already crossed. Judgement moves (exhaustion signals, resistance bands) stay with a human.
+    Returns (new_stop, reason) or None."""
+    filled = _to_date(row.get("filled")) or _to_date(row.get("day"))
+    risk = (stop - entry) if short else (entry - stop)   # R from the PUBLISHED stop, which never changes
+    closes = [b[4] for b in done if filled and utc_day(b[0]) >= filled]
+    if risk <= 0 or not closes or len(done) < 20:
+        return None
+    best = min(closes) if short else max(closes)
+    reached = (entry - best) / risk if short else (best - entry) / risk
+    if reached < 2:
+        return None
+    ma20 = sum(b[4] for b in done[-20:]) / 20
+    if reached >= 3:
+        cand, why = (min(entry, ma20) if short else max(entry, ma20)), f"已到3R（最好收盘{reached:.2f}R），止损跟随MA20 {ma20:g}"
+    else:
+        cand, why = entry, f"已到2R（最好收盘{reached:.2f}R），止损移到进场价"
+    cand = sig6(cand)
+    last = done[-1][4]
+    better = cand < live - 1e-9 * abs(live) if short else cand > live + 1e-9 * abs(live)
+    still_open = cand > last if short else cand < last
+    return (cand, why) if better and still_open else None
+
+
 def reconcile(rows, bars_by_symbol, metrics, today):
     """rows: ledger["active"]; bars_by_symbol: {sym: [(ts,o,h,l,c,v)...] oldest first, last bar may be unfinished};
     metrics: summary["指标"]; today: Beijing date. Returns a list of proposal dicts."""
@@ -74,12 +104,18 @@ def reconcile(rows, bars_by_symbol, metrics, today):
             if "日线" not in tier:
                 out.append({"issue": issue, "symbol": sym, "type": "check", "text": f"第{issue}期 {sym}：4小时档，程序暂不核对止损，请人工看"})
                 continue
-            if close is not None and ((short and close >= stop) or (not short and close <= stop)):
+            live = row.get("stop_now") or stop      # the moved stop booked in the log, else the published one
+            if close is not None and ((short and close >= live) or (not short and close <= live)):
                 out.append({"issue": issue, "symbol": sym, "type": "stop_out", "date": close_day.isoformat(), "price": close,
-                            "text": f"第{issue}期 {sym}{side}：{close_day} 日线收盘 {close:g} 已触及止损 {stop:g}，应按收盘价了结"})
+                            "text": f"第{issue}期 {sym}{side}：{close_day} 日线收盘 {close:g} 已触及止损 {live:g}，应按收盘价了结"})
+                continue
+            move = stop_move(row, done, short, entry, stop, live)
+            if move:
+                out.append({"issue": issue, "symbol": sym, "type": "stop_move", "date": close_day.isoformat(), "price": move[0],
+                            "text": f"第{issue}期 {sym}{side}：{close_day} 日线收盘 {close:g}，{move[1]}，止损 {live:g} → {move[0]:g}"})
             else:
                 out.append({"issue": issue, "symbol": sym, "type": "review",
-                            "text": f"第{issue}期 {sym}{side}持仓：止损上移（2R保本、3R跟随、衰竭信号）程序暂未核算，请人工看"})
+                            "text": f"第{issue}期 {sym}{side}持仓：衰竭信号等酌情上移程序暂未核算，请人工看"})
     return out
 
 

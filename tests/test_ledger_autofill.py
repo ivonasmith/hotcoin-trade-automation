@@ -34,6 +34,15 @@ class AutofillTest(unittest.TestCase):
         fetch.assert_called_once_with(rt)
         sync.assert_called_once_with(rt)
 
+    def test_stop_moves_are_written_with_the_fills(self):
+        rt = runtime_with([{"type": "stop_move", "issue": "36", "symbol": "SOL", "date": "2026-10-25", "price": 105.61},
+                           {"type": "stop_out", "issue": "37", "symbol": "XRP", "price": 1.5}])
+        with mock.patch.dict(os.environ, {"NOTION_TOKEN": "t"}), \
+                mock.patch.object(ledger_write, "apply_fills", return_value=["第36期SOL止损上移"]) as apply, \
+                mock.patch.object(fetch_ledger, "main"), mock.patch.object(ledger_sync, "main"):
+            auto.main(rt)
+        self.assertEqual([p["type"] for p in apply.call_args.args[0]], ["stop_move"])
+
     def test_touch_on_the_publish_day_is_left_for_a_human(self):
         rt = runtime_with([{"type": "fill", "issue": "37", "symbol": "XRP", "date": "2026-10-21"},
                            {"type": "fill", "issue": "36", "symbol": "SOL", "date": "2026-10-20"}])

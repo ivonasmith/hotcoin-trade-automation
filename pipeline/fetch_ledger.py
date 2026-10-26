@@ -114,9 +114,11 @@ def build_ledger(sections):
     summary = {row[0]: row[1] for row in summary_rows[1:] if len(row) >= 2}
     log = parse_log(find("六、"))
     # The log is append-only; the newest entry per (issue, symbol) decides the effective status.
-    latest, moved = {}, {}
+    latest, moved, filled = {}, {}, {}
     for entry in log:
         key = (entry.get("期号"), entry.get("标的"))
+        if entry.get("变更") == "成交" and entry.get("日期"):
+            filled[key] = entry["日期"]
         if entry.get("变更") == STOP_MOVE:  # a stop move is not a status change; only the newest price matters
             price = to_number(entry.get("价格"))
             if price is not None:
@@ -138,6 +140,7 @@ def build_ledger(sections):
             # "stop" stays the published stop (never edited). "stop_now" is the moved stop from the log, or None when
             # no move was booked there (moves written only in a free-text note are NOT read: too easy to misparse).
             record["stop_now"] = moved.get((record.get("issue"), record.get("symbol")))
+            record["filled"] = filled.get((record.get("issue"), record.get("symbol")))
             active.append(record)
     closed_recent = []
     for entry in reversed(log):  # newest log entries first

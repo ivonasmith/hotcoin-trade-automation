@@ -145,7 +145,7 @@ export function posterPayload({day,issue,draft,snapshot,body,english}) {
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);
 export function ledgerPayload({day,issue,draft,snapshot}) {
   const o=draft.order;
-  const proposals=(snapshot?.ledger?.proposals||[]).filter(p=>['fill','cancel','expire','stop_out'].includes(p.type));
+  const proposals=(snapshot?.ledger?.proposals||[]).filter(p=>['fill','cancel','expire','stop_out','stop_move'].includes(p.type));
   if(!o && !proposals.length) return null;
   const payload={day,issue,order:null,proposals};
   if(o) {
