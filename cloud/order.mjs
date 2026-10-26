@@ -48,14 +48,24 @@ function whyNoCandidate(symbol,screen) {
 const ACTIVE=['挂单中','持仓中'];
 const MAX_PENDING=5,MAX_SAME_SIDE_MAJOR=3,MAX_NOTIONAL=20000;
 // Reads the ledger the collection job copied from Notion. Returns the facts and the blockers it implies.
-function ledgerView(ledger,day) {
+// A held short is "profit locked" (2026-10-26 rule change) when its moved stop, as booked in the ledger log, sits strictly
+// below the entry (a stop-out would still pay) and the live price is still under that stop (so it is in profit and not
+// already due to exit). Anything we cannot read (no booked move, no price) is NOT locked: ambiguity never opens room.
+export function profitLocked(item,price) {
+  if(!item || item.status!=='持仓中' || item.side!=='做空') return false;
+  const entry=num(item.entry),stop=num(item.stop_now),last=num(price);
+  return entry!==null && stop!==null && last!==null && stop<entry && last<stop;
+}
+function ledgerView(ledger,day,metrics={}) {
   if(!ledger || ledger.ok!==true || !Array.isArray(ledger.active)) return null;
   const active=ledger.active.filter(item=>ACTIVE.includes(item.status));
   const pending=active.filter(item=>item.status==='挂单中').length;
   const majorShorts=active.filter(item=>item.side==='做空' && TRADABLE.includes(item.symbol));
+  const lockedShorts=majorShorts.filter(item=>profitLocked(item,metrics?.[item.symbol]?.price));
+  const countedShorts=majorShorts.length-lockedShorts.length;
   const notional=active.reduce((sum,item)=>sum+BASE_USD*(Number(item.size)||0),0);
   const staleDays=ledger.updated_to?Math.floor((Date.parse(day+'T00:00:00Z')-Date.parse(ledger.updated_to+'T00:00:00Z'))/86400000):null;
-  return {active,pending,majorShorts,notional,staleDays,updated_to:ledger.updated_to||null,
+  return {active,pending,majorShorts,lockedShorts,countedShorts,notional,staleDays,updated_to:ledger.updated_to||null,
     symbolsWithShort:new Set(active.filter(item=>item.side==='做空').map(item=>item.symbol))};
 }
 
@@ -90,10 +100,10 @@ export function buildOrderPlan(snapshot,day,now=Date.now()) {
     plan.notes.push(`行情快照采集完成于北京时间 ${when}（距现在约${hours.toFixed(1)}小时）`
       +(hours>4?'：价格已不新，挂单前必须先对一下交易所实时价，进场价如果已被越过，这张单一挂出去就会立刻成交':''));
   }
-  const view=ledgerView(snapshot?.ledger,day);
+  const view=ledgerView(snapshot?.ledger,day,snapshot?.summary?.['指标']);
   const humanChecks=[
     view?'熔断阶梯程序暂未核算（连续止损、账户回撤、利润回吐），请确认没有处于停机档':
-      '台账没有读到：请核对熔断状态、已挂单是否不超过5张、同方向主流币是否不超过3个',
+      '台账没有读到：请核对熔断状态、已挂单是否不超过5张、同方向主流币是否不超过3个（利润已锁定的不计）',
     '日线收盘口径：止损与作废条件以收盘价判断，请确认今日日线尚未收盘'
   ];
   if(view && view.staleDays!==null && view.staleDays>=2)
@@ -157,8 +167,12 @@ export function buildOrderPlan(snapshot,day,now=Date.now()) {
       plan.reasons.unshift(`台账里已有${view.pending}张挂单，达到${MAX_PENDING}张上限，要等有单成交、作废或到期才能新增`);
       return plan;
     }
-    if(view.majorShorts.length>=MAX_SAME_SIDE_MAJOR) {
-      plan.reasons.unshift(`台账里主流币空单已有${view.majorShorts.length}张，达到同向${MAX_SAME_SIDE_MAJOR}张上限`);
+    if(view.countedShorts>=MAX_SAME_SIDE_MAJOR) {
+      plan.reasons.unshift(`台账里主流币空单已有${view.majorShorts.length}张`
+        +(view.lockedShorts.length?`，其中${view.lockedShorts.length}张利润已锁定不计入，其余${view.countedShorts}张`:'')
+        +`，达到同向${MAX_SAME_SIDE_MAJOR}张上限`
+        +(view.majorShorts.some(item=>item.status==='持仓中' && num(item.stop_now)===null)
+          ?'（持仓中的空单如果止损已上移到进场价以下，要在台账「状态变更记录」里记一条“止损上移”，程序才认它已锁定利润）':''));
       return plan;
     }
   }
@@ -205,7 +219,9 @@ export function buildOrderPlan(snapshot,day,now=Date.now()) {
     return plan;
   }
   plan.allowed=true;
-  if(view) plan.notes.push(`台账已读取（更新到 ${view.updated_to||'未知'}）：在场${view.active.length}张，挂单${view.pending}/${MAX_PENDING}，主流币空单${view.majorShorts.length}/${MAX_SAME_SIDE_MAJOR}，名义约${Math.round(view.notional)}美元；加上本单仍在上限内`);
+  if(view) plan.notes.push(`台账已读取（更新到 ${view.updated_to||'未知'}）：在场${view.active.length}张，挂单${view.pending}/${MAX_PENDING}，主流币空单${view.countedShorts}/${MAX_SAME_SIDE_MAJOR}`
+    +(view.lockedShorts.length?`（另有${view.lockedShorts.length}张利润已锁定，不占同向名额：${view.lockedShorts.map(item=>'$'+item.symbol).join('、')}）`:'')
+    +`，名义约${Math.round(view.notional)}美元；加上本单仍在上限内`);
   plan.notes.push(...riskNotes(symbol,plan.order,metrics[symbol]));
   if(plan.order.touched_recent) plan.notes.push('这个价位15天内被碰过，仓位已按程序打折');
   if(multiplier<1) plan.notes.push('宏观层折扣已触发，仓位已按程序打折');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildOrderPlan,orderBlock,checkAgainstPlan,expiryText,fmtPrice} from '../cloud/order.mjs';
+import {buildOrderPlan,profitLocked,orderBlock,checkAgainstPlan,expiryText,fmtPrice} from '../cloud/order.mjs';
 import {lintDraft} from '../cloud/draft-style.mjs';
 
 const discount=(extra={})=>({'数据完整':true,'净流动性条件':false,'实际利率条件':false,'边缘提示':[],'新开仓倍数':1.0,'不加仓':false,...extra});
@@ -114,6 +114,47 @@ test('台账：挂单满5张、同向主流币满3张、同币已有空单都不
   const dup=snapshot();dup.ledger=ledger([{symbol:'BTC',side:'做空',status:'挂单中',size:0.12}]);
   const d=buildOrderPlan(dup,'2026-10-20');
   assert.equal(d.allowed,false);assert.equal(d.reasons.some(item=>item.includes('已经有一张在场的空单')),true);
+});
+const held=(symbol,stop_now,extra={})=>({symbol,side:'做空',status:'持仓中',size:0.12,entry:100,stop:104,stop_now,...extra});
+const withPrices=(prices)=>{const snap=snapshot();Object.assign(snap.summary['指标'],prices);return snap;};
+test('同向已有3张，但持仓空单止损已上移到进场价以下、价格仍在止损下方（利润已锁定）→ 不占名额，可以继续开',()=>{
+  const snap=withPrices({ETH:{price:90},SOL:{price:90},XRP:{price:90}});
+  snap.ledger=ledger([held('ETH',95),held('SOL',98),held('XRP',99)]);
+  const plan=buildOrderPlan(snap,'2026-10-26');
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.notes.some(item=>item.includes('主流币空单0/3')&&item.includes('3张利润已锁定')),true);
+});
+test('锁定的不算、没锁定的照算：3张里2张锁定→占1个名额，仍可开；3张都没锁定→照旧拒绝',()=>{
+  const snap=withPrices({ETH:{price:90},SOL:{price:90},XRP:{price:90}});
+  snap.ledger=ledger([held('ETH',95),held('SOL',98),held('XRP',null)]);
+  const plan=buildOrderPlan(snap,'2026-10-26');
+  assert.equal(plan.allowed,true);
+  assert.equal(plan.notes.some(item=>item.includes('主流币空单1/3')),true);
+  const none=withPrices({ETH:{price:90},SOL:{price:90},XRP:{price:90}});
+  none.ledger=ledger([held('ETH',null),held('SOL',null),held('XRP',null)]);
+  const blocked=buildOrderPlan(none,'2026-10-26');
+  assert.equal(blocked.allowed,false);
+  assert.equal(blocked.reasons[0].includes('止损上移'),true);
+});
+test('不算"利润已锁定"的情况：止损只到进场价（保本不是盈利）、价格已回到止损上方、读不到价格、挂单中、多单',()=>{
+  assert.equal(profitLocked(held('ETH',95),90),true);
+  assert.equal(profitLocked(held('ETH',100),90),false);   // stop == entry: breakeven, a gap close can still lose
+  assert.equal(profitLocked(held('ETH',95),96),false);    // price already above the moved stop
+  assert.equal(profitLocked(held('ETH',95),null),false);  // no price: not locked
+  assert.equal(profitLocked(held('ETH',95,{status:'挂单中'}),90),false);
+  assert.equal(profitLocked(held('ETH',95,{side:'做多'}),90),false);
+  assert.equal(profitLocked(held('ETH',undefined),90),false);
+});
+test('锁定不放宽其它限制：挂单5张、名义2万、同币已有空单照旧',()=>{
+  const snap=withPrices({ETH:{price:90},SOL:{price:90},XRP:{price:90}});
+  snap.ledger=ledger([held('ETH',95),held('SOL',98),held('XRP',99),...Array.from({length:5},(_,i)=>({symbol:'X'+i,side:'做空',status:'挂单中',size:0.1}))]);
+  assert.equal(buildOrderPlan(snap,'2026-10-26').reasons[0].includes('5张上限'),true);
+  const big=withPrices({ETH:{price:90}});
+  big.ledger=ledger([held('ETH',95,{size:9.9})]);
+  assert.equal(buildOrderPlan(big,'2026-10-26').reasons[0].includes('2万')||buildOrderPlan(big,'2026-10-26').reasons[0].includes('20000'),true);
+  const dup=withPrices({BTC:{price:90}});
+  dup.ledger=ledger([held('BTC',95)]);
+  assert.equal(buildOrderPlan(dup,'2026-10-26').allowed,false);
 });
 test('台账更新日期太旧会提示先更新；台账读取失败时回到人工核对',()=>{
   const old=snapshot();old.ledger=ledger([eth],{updated_to:'2026-10-16'});

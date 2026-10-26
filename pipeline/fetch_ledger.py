@@ -91,6 +91,7 @@ def parse_sections(blocks, token, get):
 
 LOG_HEADER = ["日期", "期号", "标的", "变更", "价格", "币价盈亏", "账户盈亏", "依据", "记录标记"]
 TERMINAL = ("公开作废", "过期作废", "止损了结")
+STOP_MOVE = "止损上移"
 
 
 def parse_log(rows):
@@ -113,9 +114,15 @@ def build_ledger(sections):
     summary = {row[0]: row[1] for row in summary_rows[1:] if len(row) >= 2}
     log = parse_log(find("六、"))
     # The log is append-only; the newest entry per (issue, symbol) decides the effective status.
-    latest = {}
+    latest, moved = {}, {}
     for entry in log:
-        latest[(entry.get("期号"), entry.get("标的"))] = entry.get("变更")
+        key = (entry.get("期号"), entry.get("标的"))
+        if entry.get("变更") == STOP_MOVE:  # a stop move is not a status change; only the newest price matters
+            price = to_number(entry.get("价格"))
+            if price is not None:
+                moved[key] = price
+            continue
+        latest[key] = entry.get("变更")
     header = active_rows[0]
     active = []
     for row in active_rows[1:]:
@@ -128,6 +135,9 @@ def build_ledger(sections):
         if record.get("status") in ACTIVE_STATES:
             for key in ("entry", "stop", "target", "size"):
                 record[key] = to_number(record.get(key))
+            # "stop" stays the published stop (never edited). "stop_now" is the moved stop from the log, or None when
+            # no move was booked there (moves written only in a free-text note are NOT read: too easy to misparse).
+            record["stop_now"] = moved.get((record.get("issue"), record.get("symbol")))
             active.append(record)
     closed_recent = []
     for entry in reversed(log):  # newest log entries first

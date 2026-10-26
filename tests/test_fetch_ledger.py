@@ -114,6 +114,22 @@ class ClosedStatsTests(unittest.TestCase):
         self.assertIsNone(module.build_closed_stats(table, [], 17))
         self.assertIsNone(module.build_closed_stats(table, [], 0))
 
+    def test_moved_stop_comes_only_from_the_log_and_keeps_status(self):
+        head = ["期号", "发布日", "标的", "档位", "方向", "仓位", "进场", "止损（收盘）", "目标", "状态"]
+        active = [head, ["36", "2026-10-21", "SOL", "慢档日线", "做空", "0.12", "106.54", "109.02", "96.66", "挂单中"],
+                  ["37", "2026-10-21", "XRP", "慢档日线", "做空", "0.17", "1.3724", "1.4033", "1.2489", "挂单中"]]
+        log_head = module.LOG_HEADER
+        log = [log_head,
+               ["2026-10-21", "36", "SOL", "成交", "106.54", "—", "—", "x", "k1"],
+               ["2026-10-21", "37", "XRP", "成交", "1.3724", "—", "—", "x", "k2"],
+               ["2026-10-24", "36", "SOL", "止损上移", "106.54", "—", "—", "2R保本", "k3"],
+               ["2026-10-24", "36", "SOL", "止损上移", "105.61", "—", "—", "3R", "k4"]]
+        ledger = module.build_ledger({"一、汇总": [["项目", "数值"], ["更新至", "第 39 期 · 2026-10-23"]],
+                                      "二、当前在场": active, "六、状态变更记录": log})
+        sol, xrp = ledger["active"]
+        self.assertEqual((sol["status"], sol["stop"], sol["stop_now"]), ("持仓中", 109.02, 105.61))
+        self.assertEqual((xrp["status"], xrp["stop_now"]), ("持仓中", None))
+
     def test_no_losses(self):
         table = [self.HEAD, self.trade("17", "ETH", "已了结", "+50.8 美元")]
         self.assertEqual(module.build_closed_stats(table, [], 1)["worst_loss_usd"], None)
