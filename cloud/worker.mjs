@@ -2,7 +2,7 @@ import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
 import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
-import {Flow} from './flow.mjs';
+import {Flow,tgErrorReason} from './flow.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
 
 const SCOPES='tweet.read tweet.write users.read media.write offline.access';
@@ -147,6 +147,27 @@ async function telegramUpload(env,name,bytes,caption) {
   form.append('document',new Blob([bytes],{type:'image/png'}),name);
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`,{method:'POST',body:form},60000);
 }
+// Channel post: a real photo when Telegram accepts it (<=10MB, width+height<=10000, ratio<=20), otherwise the original PNG as a file.
+function pngSize(bytes) {
+  const sig=[137,80,78,71,13,10,26,10];
+  if(!bytes || bytes.length<24 || sig.some((b,i)=>bytes[i]!==b)) return null;
+  const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+  return {w:view.getUint32(16),h:view.getUint32(20)};
+}
+export function photoOk(bytes) {
+  const size=pngSize(bytes);
+  if(!size || !size.w || !size.h || bytes.byteLength>10*1024*1024) return false;
+  return size.w+size.h<=10000 && Math.max(size.w,size.h)/Math.min(size.w,size.h)<=20;
+}
+async function telegramChannelPhoto(env,chat,name,bytes,caption) {
+  if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
+  const asPhoto=photoOk(bytes);
+  const form=new FormData();
+  form.append('chat_id',String(chat));
+  if(caption) form.append('caption',caption);
+  form.append(asPhoto?'photo':'document',new Blob([bytes],{type:'image/png'}),name);
+  return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${asPhoto?'sendPhoto':'sendDocument'}`,{method:'POST',body:form},60000);
+}
 async function telegramDownload(env,fileId) {
   const info=await telegram(env,'getFile',{file_id:fileId});
   const path=info?.result?.file_path;
@@ -256,7 +277,7 @@ export class TradeDesk {
     return {...this.env,...(saved?await unseal(saved,this.env.TOKEN_ENCRYPTION_KEY):{})};
   }
   flow(env) {
-    return new Flow(this.ctx,env,{telegram,tgUpload:telegramUpload,tgDownload:telegramDownload,provider,
+    return new Flow(this.ctx,env,{telegram,tgUpload:telegramUpload,tgChannelPhoto:telegramChannelPhoto,tgDownload:telegramDownload,provider,
       translate:(e,text,system,promptFn)=>generateDraft(e,text,draftProvider(e),system,promptFn)});
   }
   // Durable Object alarm: publish slots (zh 20:00 / en 21:00 Beijing) and the poster-job watchdog.
@@ -290,7 +311,8 @@ export class TradeDesk {
     const env={...this.env,...(saved?await unseal(saved,this.env.TOKEN_ENCRYPTION_KEY):{})};
     if(path==='/health' && request.method==='GET')
       return json({ok:true,service:'uncleonchain-trade-bot',mode:this.env.RUN_MODE||'live',
-        publishing:this.env.PUBLISH_ENABLED==='true'});
+        publishing:this.env.PUBLISH_ENABLED==='true',
+        targets:{daily:this.env.DAILY_TARGETS||'x',weekly:this.env.WEEKLY_TARGETS||'x',tg_channel:this.env.TG_CHANNEL||null}});
     if(path==='/' && request.method==='GET') {
       const callback=url.origin+'/oauth/x/callback';
       return page('链上大叔 · 热币交易后台',`<p>运行模式：${this.env.RUN_MODE==='live'?'正式环境':'测试环境'}。发布总开关：${this.env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}。</p><p>X设置页的 Callback URI / Redirect URL：</p><p><code>${escapeHTML(callback)}</code></p><p><a href="/admin">进入管理页</a></p>`);
@@ -513,6 +535,20 @@ export class TradeDesk {
     return page('X授权完成',`<p>@${escapeHTML(me.data.username)} 已连接，尚未发布任何推文。</p><p><a href="/admin">返回管理页</a></p>`,200,
       {'Set-Cookie':'desk_oauth=; HttpOnly; Secure; SameSite=Lax; Path=/oauth/x; Max-Age=0'});
   }
+  // Read-only: is the bot an admin of the channel and allowed to post? Posts nothing.
+  async channelCheck(env,reply) {
+    const channel=env.TG_CHANNEL;
+    if(!channel) { await reply('还没有配置 TG_CHANNEL（例如 @UncleOnchain），频道发布没有目标。'); return; }
+    try {
+      const me=(await telegram(env,'getMe',{}))?.result;
+      const chat=(await telegram(env,'getChat',{chat_id:channel}))?.result;
+      const member=(await telegram(env,'getChatMember',{chat_id:channel,user_id:me.id}))?.result;
+      const canPost=member?.status==='creator' || (member?.status==='administrator' && member.can_post_messages!==false);
+      await reply(`频道：${chat?.title||channel}（${chat?.type||'?'}）\n机器人：@${me?.username}，身份：${member?.status||'未知'}${member?.status==='administrator'?`，发布消息权限：${member.can_post_messages===false?'没有':'有'}`:''}\n结论：${canPost?'可以发帖':'不能发帖——把机器人设为管理员并勾选「发布消息」'}\n目标设置：日常=${env.DAILY_TARGETS||'x'}，周日=${env.WEEKLY_TARGETS||'x'}，频道语言=${env.TG_CHANNEL_LANGS||'zh'}，总开关=${env.PUBLISH_ENABLED==='true'?'开':'关'}`);
+    } catch(error) {
+      await reply(`频道检查没通过：${tgErrorReason(error)}`);
+    }
+  }
   async inbox(update,env) {
     if(update.callback_query) return this.callbackQuery(update.callback_query,env);
     const m=update.message;
@@ -542,6 +578,10 @@ export class TradeDesk {
     }
     if(text==='/reissue') {
       await this.flow(env).reissue(beijingDay());
+      return json({ok:true});
+    }
+    if(text==='/channelcheck') {
+      await this.channelCheck(env,reply);
       return json({ok:true});
     }
     if(text==='/retrypost') {

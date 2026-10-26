@@ -14,6 +14,10 @@
     "RUN_MODE": "live",
     "PUBLISH_ENABLED": "true",
     "X_PREMIUM": "true",
+    "DAILY_TARGETS": "tg",
+    "WEEKLY_TARGETS": "x",
+    "TG_CHANNEL": "@UncleOnchain",
+    "TG_CHANNEL_LANGS": "zh",
     "TRADE_LOG_URL": "https://bottlenose-muse-07e.notion.site/HotCoinDesk-Trade-Record-3cfb72fc8cae808d9deecfdc21f4cba5"
   },
   "observability": { "enabled": false }

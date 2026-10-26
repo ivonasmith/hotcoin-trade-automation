@@ -8,6 +8,14 @@ import {splitDraft,formalChinese,formalEnglish,stripTradeLog,bodyProblems,TRANSL
   issueNumber,posterNames,posterPayload,ledgerPayload,postHeader,limitCashtags} from './formal.mjs';
 import {accessToken,checkPostLength,uploadImage,createPost,xErrorReason} from './x.mjs';
 
+export function tgErrorReason(error) {
+  const status=Number(error?.status)||null;
+  const known={400:'频道找不到或请求格式不对（检查 TG_CHANNEL 是否写成 @频道用户名）',
+    401:'机器人令牌无效',403:'机器人在频道里没有发帖权限（要把机器人加为管理员并勾选「发布消息」）',
+    429:'Telegram频率限制'}[status];
+  const detail=String(error?.providerMessage||error?.message||'').replace(/\d{6,}:[A-Za-z0-9_-]{20,}/g,'[令牌已隐藏]').slice(0,200);
+  return (known?`HTTP ${status}：${known}`:(status?`HTTP ${status}`:'网络错误或超时'))+(detail?`（${detail}）`:'');
+}
 export const GRACE_MS=60*60000;      // allow data/API/review delays; after 60 minutes it waits for the reviewer
 export const LEASE_MS=12*60000;
 export const MAX_ATTEMPTS=3;
@@ -16,6 +24,8 @@ const LANGS=['zh','en'];
 const LANG_NAME={zh:'中文',en:'英文'};
 const TIME_TEXT={zh:'20:00',en:'21:00'};
 const MAX_UPLOAD=15*1024*1024;
+const TARGET_NAME={x:'X',tg:'TG频道'};
+const TG_CAPTION_MAX=1024,TG_TEXT_MAX=4096;
 
 export class Flow {
   constructor(ctx,env,deps) { this.ctx=ctx; this.s=ctx.storage; this.env=env; this.d=deps; }
@@ -40,6 +50,26 @@ export class Flow {
   label(flow) { return flow?.kind==='weekly'?'周日下周清单':`第${flow?.issue}期`; }
   timeText(flow,lang) { return flow?.kind==='weekly'?WEEKLY_TIME:TIME_TEXT[lang]; }
   async getFlow(day) { return this.s.get(this.flowKey(day)); }
+  // Where each language goes. DAILY_TARGETS / WEEKLY_TARGETS = comma list of x, tg (default x only, i.e. the old behaviour).
+  // TG goes only to TG_CHANNEL and only for the languages in TG_CHANNEL_LANGS (default zh); X carries every language.
+  plan(kind) {
+    const raw=kind==='weekly'?this.env.WEEKLY_TARGETS:this.env.DAILY_TARGETS;
+    const wanted=String(raw||'x').split(',').map(t=>t.trim().toLowerCase()).filter(t=>TARGET_NAME[t]);
+    const tgLangs=String(this.env.TG_CHANNEL_LANGS||'zh').split(',').map(t=>t.trim());
+    const plan={};
+    for(const lang of LANGS) {
+      const targets=[...new Set(wanted)].filter(t=>t==='x' || (t==='tg' && this.env.TG_CHANNEL && tgLangs.includes(lang)));
+      if(targets.length) plan[lang]=targets;
+    }
+    return plan;
+  }
+  targetText(targets) { return targets.map(t=>TARGET_NAME[t]).join(' + '); }
+  planText(flow) {
+    const plan=this.plan(flow?.kind);
+    const parts=LANGS.filter(l=>plan[l]).map(l=>`${LANG_NAME[l]}${this.timeText(flow,l)}发${this.targetText(plan[l])}`);
+    return parts.length?parts.join('；'):'没有任何发布目标';
+  }
+  slotLangs(flow) { return LANGS.filter(lang=>flow?.slots?.[lang]); }
 
   // ---------- Sunday week-ahead: the GitHub job builds pack + both posts from live data, so there is no text-review step;
   // it goes straight to the poster job, then the same final-approval / scheduled-publish path as weekday issues.
@@ -229,9 +259,9 @@ export class Flow {
     if(weekly && moved.warnings?.length) await this.say(`请核对（程序提示）：\n- ${moved.warnings.join('\n- ')}`);
     if(!weekly && this.env.TRADE_LOG_URL) await this.say(`台账链接（帖子正文不带，评论区你自己发）：${this.env.TRADE_LOG_URL}`);
     await this.say((weekly
-      ?`${this.label(moved)}：上面2张图（中、英各一张）和中英文正式稿已备齐，内容全部来自日历和台账的实时数据。请重点核对：本周新平仓有没有漏、解锁和大会名单对不对。\n通过后：不写台账（本期没有新订单）；中文、英文都按北京时间 ${WEEKLY_TIME} 安排，`
-      :`${this.label(moved)}：上面4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致。\n通过后：台账由程序自动写入；中文${TIME_TEXT.zh}、英文${TIME_TEXT.en}按时间安排，`)
-      +(this.env.PUBLISH_ENABLED==='true'?'到点自动发布。':'目前发布总开关关闭，只演练、不发推。'),
+      ?`${this.label(moved)}：上面2张图（中、英各一张）和中英文正式稿已备齐，内容全部来自日历和台账的实时数据。请重点核对：本周新平仓有没有漏、解锁和大会名单对不对。\n通过后：不写台账（本期没有新订单）；发布安排（北京时间）：${this.planText(moved)}，`
+      :`${this.label(moved)}：上面4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致。\n通过后：台账由程序自动写入；发布安排（北京时间）：${this.planText(moved)}，`)
+      +(this.env.PUBLISH_ENABLED==='true'?'到点自动发布。':'目前发布总开关关闭，只演练、不发布。'),
       [[{text:'✅ 图片与正式稿通过',callback_data:`final_ok:${day}:${moved.rev}`},
         {text:'↩️ 退回修改',callback_data:`final_reject:${day}:${moved.rev}`}]]);
     return {status:200};
@@ -320,19 +350,23 @@ export class Flow {
       await this.s.put(this.flowKey(day),{...(await this.getFlow(day)),slots:{}});
       return [`今天（${day}）不是发布日，不排发布时间。`];
     }
-    const now=this.now(),slots={};
-    for(const lang of LANGS) {
+    const now=this.now(),slots={},plan=this.plan(weekly?'weekly':'daily');
+    if(!Object.keys(plan).length) {
+      await this.s.put(this.flowKey(day),{...(await this.getFlow(day)),slots:{}});
+      return ['没有可用的发布目标（检查 DAILY_TARGETS / WEEKLY_TARGETS / TG_CHANNEL），没有排发布。'];
+    }
+    for(const lang of Object.keys(plan)) {
       const due=weekly?weeklyDueAt(day,lang):dueAt(day,lang);
-      slots[lang]={due,status:now<=due+GRACE_MS?'scheduled':'missed'};
+      slots[lang]={due,targets:plan[lang],status:now<=due+GRACE_MS?'scheduled':'missed'};
     }
     await this.s.transaction(async tx=>{
       await tx.put(this.flowKey(day),{...(await tx.get(this.flowKey(day))),slots});
       const open=(await tx.get('slots-open'))||[];
       if(!open.includes(day)) await tx.put('slots-open',[...open,day]);
     });
-    for(const lang of LANGS) {
+    for(const lang of Object.keys(plan)) {
       const time=`${day} ${weekly?WEEKLY_TIME:TIME_TEXT[lang]}`;
-      if(slots[lang].status==='scheduled') lines.push(`${LANG_NAME[lang]}版：北京时间 ${time}${this.env.PUBLISH_ENABLED==='true'?' 发布':' 演练（发布总开关关闭，不会发推）'}。`);
+      if(slots[lang].status==='scheduled') lines.push(`${LANG_NAME[lang]}版：北京时间 ${time} 发布到${this.targetText(plan[lang])}${this.env.PUBLISH_ENABLED==='true'?'':'（发布总开关关闭，只演练）'}。`);
       else {
         lines.push(`${LANG_NAME[lang]}版：${time} 已经错过，不会擅自补发，等你决定。`);
         await this.askLate(day,lang);
@@ -407,44 +441,93 @@ export class Flow {
   }
 
   // Claim first (scheduled -> publishing), act second: at most one attempt per slot, even if the alarm re-fires.
+  // A slot may carry several targets (X, TG channel); each target remembers its own progress so a retry never repeats a finished one.
   async fire(day,lang,{late=false}={}) {
     const claimed=await this.slotCas(day,lang,late?['missed']:['scheduled'],{status:'publishing',claimed:this.now()});
     if(!claimed) return false;
     const flow=await this.getFlow(day);
-    const text=limitCashtags(stripTradeLog(flow.formal[lang+'_post']));
-    const keys=[lang+'_desktop',lang+'_mobile'].filter(key=>flow.names?.[key]);
+    const targets=claimed.targets||['x'];
     const live=this.env.PUBLISH_ENABLED==='true';
+    let current=targets[0];
     try {
       if(!live) {
         await this.slotCas(day,lang,['publishing'],{status:'dry_run',finished:this.now()});
-        await this.say(`【演练，未发推】${this.label(flow)}${LANG_NAME[lang]}版到点了（北京时间 ${this.timeText(flow,lang)}）。发布总开关是关闭的，所以没有真正发布；开启后这里会发布下面这条，附${keys.length}张图：\n\n${text}`);
+        const text=stripTradeLog(flow.formal[lang+'_post']);
+        const images=targets.includes('x')?[lang+'_desktop',lang+'_mobile'].filter(key=>flow.names?.[key]).length:1;
+        await this.say(`${targets.includes('x')?'【演练，未发推】':'【演练，未发布】'}${this.label(flow)}${LANG_NAME[lang]}版到点了（北京时间 ${this.timeText(flow,lang)}）。发布总开关是关闭的，所以没有真正发布；开启后这里会发布到${this.targetText(targets)}，附${images}张图：\n\n${text}`);
         return true;
       }
-      const account=await this.s.get('x-account');
-      if(!account || account.username?.toLowerCase()!==String(this.env.EXPECTED_X_USERNAME).toLowerCase()) throw Error('X账号与预期不符');
-      const token=await accessToken({storage:this.s,env:this.env,request:this.d.provider,now:this.now()});
-      await checkPostLength({token,text,request:this.d.provider,premium:this.env.X_PREMIUM==='true'});
-      const mediaIds=[];
-      for(const key of keys) {
-        const bytes=await this.d.tgDownload(this.env,flow.files[key].file_id);
-        mediaIds.push(await uploadImage({token,bytes,name:flow.names[key],request:this.d.provider}));
+      for(const target of targets) {
+        current=target;
+        if(target==='tg') await this.publishTg(day,lang,flow);
+        else await this.publishX(day,lang,flow);
       }
-      await this.slotCas(day,lang,['publishing'],{media_ids:mediaIds});
-      const tweetId=await createPost({token,text,mediaIds,request:this.d.provider});
-      await this.slotCas(day,lang,['publishing'],{status:'posted',tweet_id:tweetId,finished:this.now()});
-      await this.say(`已发布${this.label(flow)}${LANG_NAME[lang]}版：https://x.com/${account.username}/status/${tweetId}`);
+      await this.slotCas(day,lang,['publishing'],{status:'posted',finished:this.now()});
       return true;
     } catch(error) {
       const slot=(await this.getFlow(day)).slots[lang];
       // If the post call itself may have gone through, never retry blindly.
-      // An HTTP 4xx from X means the post was refused, so it definitely did not go out; only timeouts/5xx are unknown.
+      // An HTTP 4xx means the post was refused, so it definitely did not go out; only timeouts/5xx are unknown.
       const refused=error.status>=400 && error.status<500;
-      const ambiguous=slot.media_ids && !slot.tweet_id && !refused;
-      const reason=xErrorReason(error);
-      await this.slotCas(day,lang,['publishing'],{status:ambiguous?'unknown':'failed',error:reason.slice(0,1000)});
-      await this.say(`${this.label(flow)}${LANG_NAME[lang]}版没有发布成功。X返回：${reason}。${ambiguous?'发布请求可能已经送达X，请先到账号主页确认，程序不会自动重发。':'程序不会自动重试，请处理后告诉我。'}`);
+      let ambiguous,reason,where;
+      if(current==='tg') {
+        ambiguous=!refused;
+        reason=tgErrorReason(error);
+        where='TG频道';
+      } else {
+        ambiguous=slot.media_ids && !slot.tweet_id && !refused;
+        reason=xErrorReason(error);
+        where='X';
+      }
+      await this.slotCas(day,lang,['publishing'],{status:ambiguous?'unknown':'failed',error:`${where}：${reason}`.slice(0,1000)});
+      await this.say(`${this.label(flow)}${LANG_NAME[lang]}版发布到${where}没有成功。返回：${reason}。${ambiguous?`发布请求可能已经送达${where}，请先去确认，程序不会自动重发。`:'程序不会自动重试，请处理后告诉我。'}已经成功的目标不会重复发。`);
       return false;
     }
+  }
+  async publishX(day,lang,flow) {
+    const slot=(await this.getFlow(day)).slots[lang];
+    if(slot.tweet_id) return; // finished on an earlier attempt
+    const text=limitCashtags(stripTradeLog(flow.formal[lang+'_post']));
+    const keys=[lang+'_desktop',lang+'_mobile'].filter(key=>flow.names?.[key]);
+    const account=await this.s.get('x-account');
+    if(!account || account.username?.toLowerCase()!==String(this.env.EXPECTED_X_USERNAME).toLowerCase()) throw Error('X账号与预期不符');
+    const token=await accessToken({storage:this.s,env:this.env,request:this.d.provider,now:this.now()});
+    await checkPostLength({token,text,request:this.d.provider,premium:this.env.X_PREMIUM==='true'});
+    const mediaIds=[];
+    for(const key of keys) {
+      const bytes=await this.d.tgDownload(this.env,flow.files[key].file_id);
+      mediaIds.push(await uploadImage({token,bytes,name:flow.names[key],request:this.d.provider}));
+    }
+    await this.slotCas(day,lang,['publishing'],{media_ids:mediaIds});
+    const tweetId=await createPost({token,text,mediaIds,request:this.d.provider});
+    await this.slotCas(day,lang,['publishing'],{tweet_id:tweetId});
+    await this.say(`已发布${this.label(flow)}${LANG_NAME[lang]}版：https://x.com/${account.username}/status/${tweetId}`);
+  }
+  // Channel post: the mobile poster (desktop one when only that exists) with the Chinese/English text as caption (<=1024) or a second message.
+  async publishTg(day,lang,flow) {
+    const channel=this.env.TG_CHANNEL;
+    if(!channel) throw Object.assign(Error('没有配置 TG_CHANNEL'),{status:400});
+    const slot=(await this.getFlow(day)).slots[lang];
+    const done={...(slot.tg||{})};
+    const text=stripTradeLog(flow.formal[lang+'_post']);
+    if(text.length>TG_TEXT_MAX) throw Object.assign(Error(`正文${text.length}字，超过Telegram单条上限${TG_TEXT_MAX}`),{status:400});
+    const key=[lang+'_mobile',lang+'_desktop'].find(k=>flow.names?.[k] && flow.files?.[k]);
+    const inCaption=Boolean(key) && text.length<=TG_CAPTION_MAX;
+    const save=()=>this.slotCas(day,lang,['publishing'],{tg:done});
+    if(key && !done.photo) {
+      const bytes=await this.d.tgDownload(this.env,flow.files[key].file_id);
+      const res=await this.d.tgChannelPhoto(this.env,channel,flow.names[key],bytes,inCaption?text:'');
+      done.photo=res?.result?.message_id||true;
+      await save();
+    }
+    if(!inCaption && !done.text) {
+      const res=await this.d.telegram(this.env,'sendMessage',{chat_id:channel,text,disable_web_page_preview:true});
+      done.text=res?.result?.message_id||true;
+      await save();
+    }
+    const first=Number.isInteger(done.photo)?done.photo:done.text;
+    const link=String(channel).startsWith('@') && Number.isInteger(first)?`：https://t.me/${String(channel).slice(1)}/${first}`:'';
+    await this.say(`已发布${this.label(flow)}${LANG_NAME[lang]}版到TG频道 ${channel}${link}`);
   }
   // Start the post-approval flow over for a day that has not published anything (e.g. a wrong issue number was found).
   async reissue(day) {
@@ -489,7 +572,7 @@ export class Flow {
     const flow=await this.getFlow(day);
     if(!flow || flow.status!=='final_approved') { await this.say('现在不能重发：今天的图片与正式稿还没有终审通过。'); return false; }
     let fired=0;
-    for(const lang of LANGS) {
+    for(const lang of this.slotLangs(flow)) {
       const slot=flow.slots?.[lang];
       if(slot && ['failed','unknown'].includes(slot.status)) {
         const reset=await this.slotCas(day,lang,['failed','unknown'],{status:'scheduled',retry_of:slot.error||slot.status,media_ids:null,error:null});
@@ -504,7 +587,7 @@ export class Flow {
     const flow=await this.getFlow(day);
     if(!flow || flow.status!=='final_approved') { await this.say('现在不能发：今天的图片与正式稿还没有终审通过。'); return false; }
     let fired=0;
-    for(const lang of LANGS) {
+    for(const lang of this.slotLangs(flow)) {
       const slot=(await this.getFlow(day)).slots?.[lang];
       if(slot?.status==='scheduled') { await this.fire(day,lang); fired++; }
       else await this.say(`${LANG_NAME[lang]}版当前状态是 ${slot?.status||'没有排期'}，这次不重复发。`);
