@@ -12,6 +12,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import weekly_pack as wp  # noqa: E402
 
 HANDLE = "@Uncle_Onchain"
+TG_LINK = "https://t.me/UncleOnchain"
+TG_SHOW = "t.me/UncleOnchain"
+CTA = {
+    "zh": ("加入 TG 频道", "每天北京时间 20:00 更新交易计划，21:00 更新英文版"),
+    "en": ("Join the Telegram channel", "Daily trade plan at 20:00 Beijing time (Chinese), English edition at 21:00"),
+}
+
+
+def qr_svg(url=TG_LINK):
+    """频道二维码（图片里的链接点不了，扫码进）。没装 segno 就不画，文字链接照样在。"""
+    try:
+        import io
+        import segno
+        buf = io.BytesIO()
+        segno.make(url, error="m").save(buf, kind="svg", xmldecl=False, omitsize=True, border=0, scale=1, dark="#1b1b1b")
+        return buf.getvalue().decode()
+    except Exception:  # noqa: BLE001
+        return ""
 
 CSS = """
 :root{--ink:#1b1b1b;--brown:#6f5b4b;--muted:#8a7a6a;--hair:#e6e0d3;--olive:#8C6C1F;--gray:#8A8477;--blue:#1A6694;
@@ -54,6 +72,12 @@ h1{font-family:var(--serif);font-weight:500;font-size:62px;margin-top:6px;line-h
 .note{font-size:20px;color:var(--muted);margin-top:10px;line-height:1.5}
 .sum li{font-size:25px;line-height:1.6;color:#222;margin:0 0 10px 24px}
 .honest{margin-top:14px;font-size:21px;color:var(--brown);background:#F9F7F2;border:1px solid var(--hair);padding:12px 16px;line-height:1.5}
+.cta{margin-top:30px;display:flex;align-items:center;gap:26px;border:1px solid var(--hair);border-left:7px solid #146290;background:#F3F8FB;padding:20px 26px}
+.cta .q{width:132px;height:132px;flex:none;background:#fff;padding:8px;border:1px solid var(--hair)}
+.cta .q svg{width:100%;height:100%;display:block}
+.cta .t{font-family:var(--serif);font-weight:700;font-size:34px}
+.cta .d{font-size:21px;color:var(--brown);margin-top:6px;line-height:1.45}
+.cta .u{font-family:var(--mono);font-weight:700;font-size:30px;color:#146290;margin-top:8px}
 .foot{margin-top:28px;padding-top:16px;border-top:1px solid var(--hair);display:flex;justify-content:space-between;gap:20px;align-items:flex-end}
 .foot .l{font-size:17px;color:var(--gray);line-height:1.5;flex:1 1 auto;min-width:0}
 .foot .r{text-align:right;white-space:nowrap}
@@ -98,6 +122,10 @@ def build(pack, lang):
         hack_html = (f'<div style="font-size:22px;font-weight:700;color:var(--brown);margin-top:16px">{t["hack_h"]}</div>'
                      f'<table class="ev">' + "".join(f'<tr><td class="d">{esc(a)}</td><td colspan="2">{esc(b)}</td></tr>' for a, b in t["hack"]) + "</table>")
     tiles = "".join(f'<div class="tile"><div class="v">{esc(t[k+"v"])}</div><div class="l">{esc(t[k+"l"])}</div></div>' for k in ("t1", "t2", "t3", "t4"))
+    head, desc = CTA[lang]
+    qr = qr_svg()
+    cta_html = (f'<div class="cta">' + (f'<div class="q">{qr}</div>' if qr else "")
+                + f'<div><div class="t">{esc(head)}</div><div class="d">{esc(desc)}</div><div class="u">{TG_SHOW}</div></div></div>')
     return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><style>{CSS}</style></head><body>
 <div class="bar"></div><div class="wrap">
 <div class="kicker">{esc(t['kicker'])}</div>
@@ -112,6 +140,7 @@ def build(pack, lang):
 <div class="sec"><div class="sech"><span class="t">{t['s4']}</span><span class="n">{esc(t['s4n'])}</span></div>
  <div class="card gold"><ul class="sum">{li(t['recap'])}</ul></div>
 </div>
+{cta_html}
 <div class="foot"><div class="l">{esc(t['foot'])}<br>{esc(t['src'])}</div><div class="r"><div class="s">{t['sig']}</div><div class="h">{HANDLE}</div></div></div>
 </div></body></html>"""
 

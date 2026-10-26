@@ -254,3 +254,21 @@ export function checkAgainstPlan(content,plan) {
   if(missing.length) warnings.push(`新单数字与程序计算不一致或缺失：${missing.join('、')}`);
   return warnings;
 }
+
+// Track record the drafter may quote. Same arithmetic as the Sunday poster: return = cumulative P&L / (equity - cumulative P&L).
+// Only numbers computed here may appear in the post; losses are listed as plainly as wins.
+export function recordBlock(ledger) {
+  if(!ledger || ledger.ok!==true || !ledger.counts) return '程序给的战绩：台账没读到，正文不写战绩，也不要估数字。';
+  const cum=ledger.cumulative_pnl_usd,equity=ledger.equity_usd;
+  const lines=['程序给的战绩（正文只能用这里的数字，原样写，不自己算、不取整；亏损和盈利一样如实写，不回避）：'];
+  const usd=value=>`${value>=0?'+':'-'}${Math.abs(value).toLocaleString('en-US',{maximumFractionDigits:2})}美元`;
+  if(Number.isFinite(cum)) {
+    const base=Number.isFinite(equity)?equity-cum:10000;
+    const ret=base?cum/base*100:null;
+    lines.push(`已了结 ${ledger.counts.closed} 笔，累计盈亏 ${usd(cum)}${ret===null?'':`，账户收益 ${ret>=0?'+':''}${ret.toFixed(2)}%`}（更新到 ${ledger.updated_to||'未知'}）。`);
+  }
+  lines.push(`目前在手 ${ledger.counts.open} 张、挂单 ${ledger.counts.pending} 张。`);
+  const recent=(ledger.closed_recent||[]).slice(0,3);
+  if(recent.length) lines.push('最近了结（新到旧）：'+recent.map(item=>`$${item.symbol} 第${item.issue}期 币价${item.pct}，账户${item.usd}`).join('；'));
+  return lines.join('\n');
+}

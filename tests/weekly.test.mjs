@@ -88,7 +88,7 @@ test('不是周日的日子不接收',async()=>{
   assert.equal(await h.flow.getFlow('2026-10-24'),undefined);
 });
 
-test('出图完成：先发固定帖子文字和程序提示，再发终审按钮；不带台账链接，标题不是「第N期」',async()=>{
+test('出图完成：发固定帖子文字和程序提示，不要审核、自动排好并带取消按钮；不带台账链接，标题不是「第N期」',async()=>{
   const h=harness();
   await toAwaitingFinal(h);
   const t=texts(h);
@@ -98,7 +98,11 @@ test('出图完成：先发固定帖子文字和程序提示，再发终审按�
   assert.ok(!t.some(x=>x.includes('notion.example')),'周日清单没有台账链接');
   assert.ok(!t.some(x=>/第undefined期|第null期/.test(x)));
   const last=h.log.telegram.at(-1);
-  assert.deepEqual(last.reply_markup.inline_keyboard.flat().map(b=>b.callback_data),[`final_ok:${SUN}:1`,`final_reject:${SUN}:1`]);
+  assert.deepEqual(last.reply_markup.inline_keyboard.flat().map(b=>b.callback_data),[`cancel_post:${SUN}:zh`]);
+  assert.ok(!h.log.telegram.some(m=>JSON.stringify(m.reply_markup||'').includes('final_ok')),'周日没有审核按钮');
+  const flow=await h.flow.getFlow(SUN);
+  assert.equal(flow.status,'final_approved');
+  assert.equal(flow.slots.zh.status,'scheduled');
   assert.equal(h.log.uploads.length,2);
   assert.ok(h.log.uploads.every(u=>u.caption.startsWith('周日下周清单')));
 });
@@ -114,28 +118,29 @@ test('图片没收齐不能进终审',async()=>{
   assert.ok(texts(h).some(x=>x.includes('2张图片没有收齐')));
 });
 
-test('终审通过：不写台账、不占期号，只排一条帖子（中英两张海报）在周日 20:00，闹钟指向 20:00',async()=>{
+test('出图完成即自动排期：不写台账、不占期号，只排一条帖子在周日 20:00，闹钟指向 20:00',async()=>{
   const h=harness();
   await toAwaitingFinal(h);
-  assert.equal(await h.flow.finalApprove(SUN,1),true);
   const flow=await h.flow.getFlow(SUN);
   assert.equal(flow.slots.zh.due,Date.parse(SUN+'T20:00:00+08:00'));
   assert.equal(flow.slots.en,undefined,'周日只有一条帖子');
   assert.deepEqual(flow.slots.zh.targets,['x']);
-  assert.equal(flow.slots.zh.status,'scheduled');
   assert.equal(flow.ledger_job,undefined);
   assert.equal((await h.flow.s.get('issues'))?.[SUN],undefined);
   assert.equal(h.alarm(),Date.parse(SUN+'T20:00:00+08:00'));
-  assert.ok(texts(h).some(x=>x.includes('不写台账')&&x.includes('20:00')));
+  assert.ok(texts(h).some(x=>x.includes('不需要审核')&&x.includes('不写台账')&&x.includes('20:00')));
 });
 
-test('退回：不排发布，告诉怎么重新出一份',async()=>{
+test('取消按钮：到点前取消，不发布；已经开始发布就取消不了',async()=>{
   const h=harness();
   await toAwaitingFinal(h);
-  assert.equal(await h.flow.finalReject(SUN,1),true);
-  assert.equal((await h.flow.getFlow(SUN)).slots.zh,undefined);
-  assert.ok(texts(h).some(x=>x.includes('手动运行')));
-  assert.equal(h.alarm(),null);
+  assert.equal(await h.flow.cancelPost(SUN,'zh'),true);
+  assert.equal((await h.flow.getFlow(SUN)).slots.zh.status,'skipped');
+  h.state.now=Date.parse(SUN+'T20:00:05+08:00');
+  await h.flow.alarm();
+  assert.equal(h.log.x.length,0);
+  assert.equal(texts(h).filter(x=>x.includes('【演练')).length,0);
+  assert.equal(await h.flow.cancelPost(SUN,'zh'),false);
 });
 
 test('到点演练：一条帖子带两张海报，不调用X，闹钟重复触发不重复',async()=>{
@@ -178,10 +183,8 @@ test('开关打开：一条帖子，固定文案，带中英两张海报，只�
 });
 
 test('错过 20:00 超过 60 分钟：问你要不要补发，不擅自补',async()=>{
-  const h=harness();
+  const h=harness({now:Date.parse(SUN+'T20:00:00+08:00')+GRACE_MS+60000});
   await toAwaitingFinal(h);
-  h.state.now=Date.parse(SUN+'T20:00:00+08:00')+GRACE_MS+60000;
-  await h.flow.finalApprove(SUN,1);
   const flow=await h.flow.getFlow(SUN);
   assert.equal(flow.slots.zh.status,'missed');
   assert.ok(texts(h).some(x=>x.includes('周日下周清单')===false&&x.includes('要现在补发吗')&&x.includes('20:00')));

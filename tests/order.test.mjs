@@ -171,3 +171,13 @@ test('备注里写明行情快照的采集时间，超过4小时提示先核对�
   assert.match(stale.notes[0],/约8\.0小时）：价格已不新.*立刻成交/);
   assert.equal(buildOrderPlan(snapshot(),'2026-10-21').notes.some(item=>item.includes('行情快照采集')),false);
 });
+
+test('战绩块：只给程序算好的数字，亏损照写；台账没读到就明说不写',async()=>{
+  const {recordBlock}=await import('../cloud/order.mjs');
+  const block=recordBlock({ok:true,updated_to:'2026-10-24',equity_usd:10683.72,cumulative_pnl_usd:683.72,
+    counts:{closed:17,open:2,pending:1},closed_recent:[{issue:'35',symbol:'SOL',pct:'-2.1%',usd:'-45.6 USD'}]});
+  assert.ok(block.includes('已了结 17 笔')&&block.includes('+683.72美元')&&block.includes('账户收益 +6.84%'));
+  assert.ok(block.includes('在手 2 张')&&block.includes('$SOL 第35期 币价-2.1%'));
+  assert.ok(recordBlock(null).includes('不写战绩'));
+  assert.ok(recordBlock({ok:true,counts:{closed:3,open:0,pending:0},cumulative_pnl_usd:-120,equity_usd:9880}).includes('-120美元'));
+});

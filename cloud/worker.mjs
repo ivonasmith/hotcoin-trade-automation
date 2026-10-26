@@ -1,6 +1,6 @@
 import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
-import {buildOrderPlan,orderBlock} from './order.mjs';
+import {buildOrderPlan,orderBlock,recordBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {Flow,tgErrorReason} from './flow.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
@@ -650,7 +650,7 @@ export class TradeDesk {
       const hotspots=saved.parts.join('\n\n');
       const plan=buildOrderPlan(snapshot,day);
       which=draftProvider(env);
-      const generated=await generateDraft(env,hotspots+verified+'\n\n'+orderBlock(plan),which);
+      const generated=await generateDraft(env,hotspots+verified+'\n\n'+orderBlock(plan)+'\n\n'+recordBlock(snapshot?.ledger),which);
       // Deterministic safety nets: $ prefix on coins, and a format check the reviewer can see.
       const content=normalizeTickers(generated.content,collectTickers(snapshot,hotspots));
       const lint=lintDraft(content,plan,hotspots);
@@ -714,6 +714,9 @@ export class TradeDesk {
       await answer(await flow.finalApprove(day,extra)?'已通过':'该稿件已经处理');
     } else if(action==='final_reject') {
       await answer(await flow.finalReject(day,extra)?'已退回':'该稿件已经处理');
+    } else if(action==='cancel_post') {
+      await answer('处理中');
+      await flow.cancelPost(day,extra);
     } else if(action==='late_post' || action==='late_skip') {
       await answer(action==='late_post'?'处理中':'已记下');
       await flow.lateDecision(day,extra,action==='late_post');

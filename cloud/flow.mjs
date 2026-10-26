@@ -267,9 +267,12 @@ export class Flow {
     }
     if(weekly && moved.warnings?.length) await this.say(`请核对（程序提示）：\n- ${moved.warnings.join('\n- ')}`);
     if(!weekly && this.env.TRADE_LOG_URL) await this.say(`台账链接（帖子正文不带，评论区你自己发）：${this.env.TRADE_LOG_URL}`);
-    await this.say((weekly
-      ?`${this.label(moved)}：上面2张海报（中、英各一张）已出齐，内容全部来自日历和台账的实时数据，由程序排版出图。请重点核对：本周新平仓有没有漏、解锁和大会名单对不对。\n通过后：不写台账（本期没有新订单）；发布安排（北京时间）：${this.planText(moved)}，`
-      :`${this.label(moved)}：上面4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致。\n通过后：台账由程序自动写入；发布安排（北京时间）：${this.planText(moved)}，`)
+    if(weekly) {
+      // Sunday needs no review: content is program data, caption is fixed. Schedule it now; the message carries a cancel button.
+      await this.finalApprove(day,moved.rev);
+      return {status:200};
+    }
+    await this.say(`${this.label(moved)}：上面4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致。\n通过后：台账由程序自动写入；发布安排（北京时间）：${this.planText(moved)}，`
       +(this.env.PUBLISH_ENABLED==='true'?'到点自动发布。':'目前发布总开关关闭，只演练、不发布。'),
       [[{text:'✅ 图片与正式稿通过',callback_data:`final_ok:${day}:${moved.rev}`},
         {text:'↩️ 退回修改',callback_data:`final_reject:${day}:${moved.rev}`}]]);
@@ -316,9 +319,10 @@ export class Flow {
     const approved=await this.cas(this.flowKey(day),['awaiting_final'],current=>current.rev===Number(rev)?{status:'final_approved',approved:this.now()}:{});
     if(!approved || approved.status!=='final_approved') return false;
     if(approved.kind==='weekly') {
-      const lines=['图片与正式稿已通过。','台账：周日清单没有新订单，不写台账。'];
+      const lines=['周日清单不需要审核：2张海报已出齐（见上面），已自动排好。','台账：周日清单没有新订单，不写台账。'];
       lines.push(...await this.schedule(day));
-      await this.say(lines.join('\n'));
+      lines.push(this.env.PUBLISH_ENABLED==='true'?'不想发这条，到点前点下面的按钮取消。':'目前发布总开关关闭，只演练、不发布。');
+      await this.say(lines.join('\n'),[[{text:'⛔ 取消这条',callback_data:`cancel_post:${day}:zh`}]]);
       return true;
     }
     // From now on this day owns its issue number, so tomorrow's number follows it even if the ledger has no new order.
@@ -608,6 +612,15 @@ export class Flow {
     }
     await this.arm();
     return fired>0;
+  }
+  // Cancel a post that has not started publishing (scheduled, or missed and waiting for a decision).
+  async cancelPost(day,lang) {
+    const flow=await this.getFlow(day);
+    const slot=await this.slotCas(day,lang,['scheduled','missed'],{status:'skipped',finished:this.now()});
+    if(slot) await this.say(`已取消：${this.slotName(flow,lang)}不会发布。`);
+    else await this.say(`${this.slotName(flow,lang)}已经开始发布或已处理，取消不了。`);
+    await this.arm();
+    return Boolean(slot);
   }
   async lateDecision(day,lang,post) {
     if(!LANGS.includes(lang)) return false;
