@@ -51,14 +51,15 @@ export class Flow {
   timeText(flow,lang) { return flow?.kind==='weekly'?WEEKLY_TIME:TIME_TEXT[lang]; }
   async getFlow(day) { return this.s.get(this.flowKey(day)); }
   // Where each language goes. DAILY_TARGETS / WEEKLY_TARGETS = comma list of x, tg (default x only, i.e. the old behaviour).
-  // TG goes only to TG_CHANNEL and only for the languages in TG_CHANNEL_LANGS (default zh); X carries every language.
+  // TG goes only to TG_CHANNEL and only for the languages in TG_CHANNEL_LANGS (default zh); X carries the languages in DAILY_X_LANGS / WEEKLY_X_LANGS (default zh,en).
   plan(kind) {
     const raw=kind==='weekly'?this.env.WEEKLY_TARGETS:this.env.DAILY_TARGETS;
     const wanted=String(raw||'x').split(',').map(t=>t.trim().toLowerCase()).filter(t=>TARGET_NAME[t]);
     const tgLangs=String(this.env.TG_CHANNEL_LANGS||'zh').split(',').map(t=>t.trim());
+    const xLangs=String((kind==='weekly'?this.env.WEEKLY_X_LANGS:this.env.DAILY_X_LANGS)||'zh,en').split(',').map(t=>t.trim());
     const plan={};
     for(const lang of LANGS) {
-      const targets=[...new Set(wanted)].filter(t=>t==='x' || (t==='tg' && this.env.TG_CHANNEL && tgLangs.includes(lang)));
+      const targets=[...new Set(wanted)].filter(t=>(t==='x' && xLangs.includes(lang)) || (t==='tg' && this.env.TG_CHANNEL && tgLangs.includes(lang)));
       if(targets.length) plan[lang]=targets;
     }
     return plan;

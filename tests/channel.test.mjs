@@ -250,3 +250,24 @@ test('/channelcheck：只读检查，管理员且能发消息才说可以发帖'
     assert.ok(out[0].includes('TG_CHANNEL'));
   } finally { globalThis.fetch=original; }
 });
+
+test('日常配置：中文进频道、英文发 X；周日中英都发 X',async()=>{
+  const h=harness({env:{DAILY_TARGETS:'tg,x',DAILY_X_LANGS:'en',TG_CHANNEL_LANGS:'zh',WEEKLY_TARGETS:'x'},now:Date.parse(DAY+'T10:00:00+08:00')});
+  await xReady(h);
+  await seedDaily(h);
+  await h.flow.schedule(DAY);
+  const flow=await h.flow.getFlow(DAY);
+  assert.deepEqual(flow.slots.zh.targets,['tg']);
+  assert.deepEqual(flow.slots.en.targets,['x']);
+  h.state.now=dueAt(DAY,'zh')+1000;
+  await h.flow.alarm();
+  assert.equal(h.log.photos.length,1);
+  assert.equal(h.log.x.length,0,'中文不发 X');
+  h.state.now=dueAt(DAY,'en')+1000;
+  await h.flow.alarm();
+  const posts=h.log.x.filter(c=>c.url.endsWith('/tweets'));
+  assert.equal(posts.length,1);
+  assert.ok(JSON.parse(posts[0].body).text.startsWith('Today I am placing'));
+  assert.equal(h.flow.plan('weekly').zh[0],'x');
+  assert.deepEqual(Object.keys(h.flow.plan('weekly')),['zh','en']);
+});
