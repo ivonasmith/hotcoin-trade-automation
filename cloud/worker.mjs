@@ -358,11 +358,8 @@ export class TradeDesk {
       }
       const pack=body.pack;
       if(body.day!==day || pack?.kind!=='weekly' || pack.day!==day) return json({ok:false,error:'日期不是今天，或数据包格式不对'},400);
-      if(typeof body.zh_post!=='string' || typeof body.en_post!=='string' || !body.zh_post.startsWith('【$BTC下周清单】')
-        || !body.en_post.startsWith('【$BTC Week Ahead】') || /[\u4e00-\u9fff]/.test(body.en_post))
-        return json({ok:false,error:'帖子文字不符合格式（标题或英文稿含中文）'},400);
       if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
-      const result=await this.flow(env).startWeekly(day,{pack,zh_post:body.zh_post.trim(),en_post:body.en_post.trim()});
+      const result=await this.flow(env).startWeekly(day,{pack});
       return json({ok:result.status===200,...result,status:undefined},result.status);
     }
     if(path.startsWith('/pipeline/jobs/')) {

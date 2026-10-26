@@ -24,6 +24,8 @@ const LANGS=['zh','en'];
 const LANG_NAME={zh:'中文',en:'英文'};
 const TIME_TEXT={zh:'20:00',en:'21:00'};
 const MAX_UPLOAD=15*1024*1024;
+// Sunday: ONE X post carrying both posters (zh + en) with this fixed bilingual caption; the posters hold all the content.
+export const WEEKLY_CAPTION='【$BTC\n\n下周的交易计划和大事前瞻来了，速看！ 👇\nThe week ahead plan is coming. Let\'s dive in! 👇】';
 const TARGET_NAME={x:'X',tg:'TG频道'};
 const TG_CAPTION_MAX=1024,TG_TEXT_MAX=4096;
 
@@ -48,6 +50,8 @@ export class Flow {
   flowKey=day=>'flow:'+day;
   // Weekday issues have a number; the Sunday week-ahead has none ("第N期" would be wrong for it).
   label(flow) { return flow?.kind==='weekly'?'周日下周清单':`第${flow?.issue}期`; }
+  // Sunday has one combined post, so its slot has no language label.
+  slotName(flow,lang) { return flow?.kind==='weekly'?'周日海报帖':`${LANG_NAME[lang]}版`; }
   timeText(flow,lang) { return flow?.kind==='weekly'?WEEKLY_TIME:TIME_TEXT[lang]; }
   async getFlow(day) { return this.s.get(this.flowKey(day)); }
   // Where each language goes. DAILY_TARGETS / WEEKLY_TARGETS = comma list of x, tg (default x only, i.e. the old behaviour).
@@ -58,6 +62,7 @@ export class Flow {
     const tgLangs=String(this.env.TG_CHANNEL_LANGS||'zh').split(',').map(t=>t.trim());
     const xLangs=String((kind==='weekly'?this.env.WEEKLY_X_LANGS:this.env.DAILY_X_LANGS)||'zh,en').split(',').map(t=>t.trim());
     const plan={};
+    if(kind==='weekly') return wanted.includes('x')?{zh:['x']}:{};
     for(const lang of LANGS) {
       const targets=[...new Set(wanted)].filter(t=>(t==='x' && xLangs.includes(lang)) || (t==='tg' && this.env.TG_CHANNEL && tgLangs.includes(lang)));
       if(targets.length) plan[lang]=targets;
@@ -67,14 +72,14 @@ export class Flow {
   targetText(targets) { return targets.map(t=>TARGET_NAME[t]).join(' + '); }
   planText(flow) {
     const plan=this.plan(flow?.kind);
-    const parts=LANGS.filter(l=>plan[l]).map(l=>`${LANG_NAME[l]}${this.timeText(flow,l)}发${this.targetText(plan[l])}`);
+    const parts=LANGS.filter(l=>plan[l]).map(l=>`${flow?.kind==='weekly'?'中英两张海报同一条帖子':LANG_NAME[l]}${this.timeText(flow,l)}发${this.targetText(plan[l])}`);
     return parts.length?parts.join('；'):'没有任何发布目标';
   }
   slotLangs(flow) { return LANGS.filter(lang=>flow?.slots?.[lang]); }
 
   // ---------- Sunday week-ahead: the GitHub job builds pack + both posts from live data, so there is no text-review step;
   // it goes straight to the poster job, then the same final-approval / scheduled-publish path as weekday issues.
-  async startWeekly(day,{pack,zh_post,en_post}) {
+  async startWeekly(day,{pack}) {
     if(!weeklyDay(day).ok) return {status:400,error:weeklyDay(day).reason};
     const names={zh_desktop:`poster_zh_周日下周清单_${day}.png`,en_desktop:`poster_en_周日下周清单_${day}.png`};
     const started=await this.s.transaction(async tx=>{
@@ -82,7 +87,7 @@ export class Flow {
       if(existing && !['poster_failed','final_rejected','archived'].includes(existing.status)) return null;
       const rev=(existing?.rev||0)+1;
       const next={day,kind:'weekly',status:'poster_pending',rev,started:this.now(),slots:{},history:existing?.history||[],
-        formal:{zh:zh_post,en:en_post,zh_post:limitCashtags(zh_post),en_post:limitCashtags(en_post)},names,files:{},
+        formal:{zh_post:WEEKLY_CAPTION,en_post:WEEKLY_CAPTION},names,files:{},
         poster_job:`poster:${day}:${rev}`,weekly_pack:pack,warnings:pack.warnings||[]};
       await tx.put(this.flowKey(day),next);
       return next;
@@ -255,12 +260,15 @@ export class Flow {
     await this.arm();
     const f=moved.formal;
     const weekly=moved.kind==='weekly';
-    await this.say(`${this.label(moved)} 中文正式稿（${this.timeText(moved,'zh')} 北京时间）：\n\n${stripTradeLog(f.zh_post)}`);
-    await this.say(`${this.label(moved)} 英文正式稿（${this.timeText(moved,'en')} 北京时间）：\n\n${stripTradeLog(f.en_post)}`);
+    if(weekly) await this.say(`${this.label(moved)} 帖子文字（固定，海报里才有内容；${this.timeText(moved,'zh')} 北京时间，同一条帖子带中、英两张海报）：\n\n${WEEKLY_CAPTION}`);
+    else {
+      await this.say(`${this.label(moved)} 中文正式稿（${this.timeText(moved,'zh')} 北京时间）：\n\n${stripTradeLog(f.zh_post)}`);
+      await this.say(`${this.label(moved)} 英文正式稿（${this.timeText(moved,'en')} 北京时间）：\n\n${stripTradeLog(f.en_post)}`);
+    }
     if(weekly && moved.warnings?.length) await this.say(`请核对（程序提示）：\n- ${moved.warnings.join('\n- ')}`);
     if(!weekly && this.env.TRADE_LOG_URL) await this.say(`台账链接（帖子正文不带，评论区你自己发）：${this.env.TRADE_LOG_URL}`);
     await this.say((weekly
-      ?`${this.label(moved)}：上面2张图（中、英各一张）和中英文正式稿已备齐，内容全部来自日历和台账的实时数据。请重点核对：本周新平仓有没有漏、解锁和大会名单对不对。\n通过后：不写台账（本期没有新订单）；发布安排（北京时间）：${this.planText(moved)}，`
+      ?`${this.label(moved)}：上面2张海报（中、英各一张）已出齐，内容全部来自日历和台账的实时数据，由程序排版出图。请重点核对：本周新平仓有没有漏、解锁和大会名单对不对。\n通过后：不写台账（本期没有新订单）；发布安排（北京时间）：${this.planText(moved)}，`
       :`${this.label(moved)}：上面4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致。\n通过后：台账由程序自动写入；发布安排（北京时间）：${this.planText(moved)}，`)
       +(this.env.PUBLISH_ENABLED==='true'?'到点自动发布。':'目前发布总开关关闭，只演练、不发布。'),
       [[{text:'✅ 图片与正式稿通过',callback_data:`final_ok:${day}:${moved.rev}`},
@@ -367,9 +375,9 @@ export class Flow {
     });
     for(const lang of Object.keys(plan)) {
       const time=`${day} ${weekly?WEEKLY_TIME:TIME_TEXT[lang]}`;
-      if(slots[lang].status==='scheduled') lines.push(`${LANG_NAME[lang]}版：北京时间 ${time} 发布到${this.targetText(plan[lang])}${this.env.PUBLISH_ENABLED==='true'?'':'（发布总开关关闭，只演练）'}。`);
+      if(slots[lang].status==='scheduled') lines.push(`${this.slotName({kind:weekly?'weekly':'daily'},lang)}：北京时间 ${time} 发布到${this.targetText(plan[lang])}${this.env.PUBLISH_ENABLED==='true'?'':'（发布总开关关闭，只演练）'}。`);
       else {
-        lines.push(`${LANG_NAME[lang]}版：${time} 已经错过，不会擅自补发，等你决定。`);
+        lines.push(`${this.slotName({kind:weekly?'weekly':'daily'},lang)}：${time} 已经错过，不会擅自补发，等你决定。`);
         await this.askLate(day,lang);
       }
     }
@@ -378,7 +386,7 @@ export class Flow {
   }
   async askLate(day,lang) {
     const flow=await this.getFlow(day);
-    await this.say(`${LANG_NAME[lang]}版的计划时间（北京时间 ${day} ${this.timeText(flow,lang)}）已经过了。要现在补发吗？程序不会自己补发。`,
+    await this.say(`${this.slotName(flow,lang)}的计划时间（北京时间 ${day} ${this.timeText(flow,lang)}）已经过了。要现在补发吗？程序不会自己补发。`,
       [[{text:'现在补发',callback_data:`late_post:${day}:${lang}`},{text:'这条不发了',callback_data:`late_skip:${day}:${lang}`}]]);
   }
   async arm() {
@@ -454,8 +462,8 @@ export class Flow {
       if(!live) {
         await this.slotCas(day,lang,['publishing'],{status:'dry_run',finished:this.now()});
         const text=stripTradeLog(flow.formal[lang+'_post']);
-        const images=targets.includes('x')?[lang+'_desktop',lang+'_mobile'].filter(key=>flow.names?.[key]).length:1;
-        await this.say(`${targets.includes('x')?'【演练，未发推】':'【演练，未发布】'}${this.label(flow)}${LANG_NAME[lang]}版到点了（北京时间 ${this.timeText(flow,lang)}）。发布总开关是关闭的，所以没有真正发布；开启后这里会发布到${this.targetText(targets)}，附${images}张图：\n\n${text}`);
+        const images=targets.includes('x')?this.xKeys(flow,lang).length:1;
+        await this.say(`${targets.includes('x')?'【演练，未发推】':'【演练，未发布】'}${this.label(flow)}${this.slotName(flow,lang)}到点了（北京时间 ${this.timeText(flow,lang)}）。发布总开关是关闭的，所以没有真正发布；开启后这里会发布到${this.targetText(targets)}，附${images}张图：\n\n${text}`);
         return true;
       }
       for(const target of targets) {
@@ -481,15 +489,20 @@ export class Flow {
         where='X';
       }
       await this.slotCas(day,lang,['publishing'],{status:ambiguous?'unknown':'failed',error:`${where}：${reason}`.slice(0,1000)});
-      await this.say(`${this.label(flow)}${LANG_NAME[lang]}版发布到${where}没有成功。返回：${reason}。${ambiguous?`发布请求可能已经送达${where}，请先去确认，程序不会自动重发。`:'程序不会自动重试，请处理后告诉我。'}已经成功的目标不会重复发。`);
+      await this.say(`${this.label(flow)}${this.slotName(flow,lang)}发布到${where}没有成功。返回：${reason}。${ambiguous?`发布请求可能已经送达${where}，请先去确认，程序不会自动重发。`:'程序不会自动重试，请处理后告诉我。'}已经成功的目标不会重复发。`);
       return false;
     }
+  }
+  // Weekday: that language's posters. Sunday: the zh and en posters together in one post.
+  xKeys(flow,lang) {
+    const keys=flow.kind==='weekly'?['zh_desktop','en_desktop']:[lang+'_desktop',lang+'_mobile'];
+    return keys.filter(key=>flow.names?.[key]);
   }
   async publishX(day,lang,flow) {
     const slot=(await this.getFlow(day)).slots[lang];
     if(slot.tweet_id) return; // finished on an earlier attempt
     const text=limitCashtags(stripTradeLog(flow.formal[lang+'_post']));
-    const keys=[lang+'_desktop',lang+'_mobile'].filter(key=>flow.names?.[key]);
+    const keys=this.xKeys(flow,lang);
     const account=await this.s.get('x-account');
     if(!account || account.username?.toLowerCase()!==String(this.env.EXPECTED_X_USERNAME).toLowerCase()) throw Error('X账号与预期不符');
     const token=await accessToken({storage:this.s,env:this.env,request:this.d.provider,now:this.now()});
@@ -502,7 +515,7 @@ export class Flow {
     await this.slotCas(day,lang,['publishing'],{media_ids:mediaIds});
     const tweetId=await createPost({token,text,mediaIds,request:this.d.provider});
     await this.slotCas(day,lang,['publishing'],{tweet_id:tweetId});
-    await this.say(`已发布${this.label(flow)}${LANG_NAME[lang]}版：https://x.com/${account.username}/status/${tweetId}`);
+    await this.say(`已发布${this.label(flow)}${this.slotName(flow,lang)}：https://x.com/${account.username}/status/${tweetId}`);
   }
   // Channel post: the mobile poster (desktop one when only that exists) with the Chinese/English text as caption (<=1024) or a second message.
   async publishTg(day,lang,flow) {
@@ -528,7 +541,7 @@ export class Flow {
     }
     const first=Number.isInteger(done.photo)?done.photo:done.text;
     const link=String(channel).startsWith('@') && Number.isInteger(first)?`：https://t.me/${String(channel).slice(1)}/${first}`:'';
-    await this.say(`已发布${this.label(flow)}${LANG_NAME[lang]}版到TG频道 ${channel}${link}`);
+    await this.say(`已发布${this.label(flow)}${this.slotName(flow,lang)}到TG频道 ${channel}${link}`);
   }
   // Start the post-approval flow over for a day that has not published anything (e.g. a wrong issue number was found).
   async reissue(day) {
@@ -578,7 +591,7 @@ export class Flow {
       if(slot && ['failed','unknown'].includes(slot.status)) {
         const reset=await this.slotCas(day,lang,['failed','unknown'],{status:'scheduled',retry_of:slot.error||slot.status,media_ids:null,error:null});
         if(reset && await this.fire(day,lang)) fired++;
-      } else await this.say(`${LANG_NAME[lang]}版当前状态是 ${slot?.status||'没有排期'}，这次不重发。`);
+      } else await this.say(`${this.slotName(flow,lang)}当前状态是 ${slot?.status||'没有排期'}，这次不重发。`);
     }
     await this.arm();
     return fired>0;
@@ -591,7 +604,7 @@ export class Flow {
     for(const lang of this.slotLangs(flow)) {
       const slot=(await this.getFlow(day)).slots?.[lang];
       if(slot?.status==='scheduled') { await this.fire(day,lang); fired++; }
-      else await this.say(`${LANG_NAME[lang]}版当前状态是 ${slot?.status||'没有排期'}，这次不重复发。`);
+      else await this.say(`${this.slotName(flow,lang)}当前状态是 ${slot?.status||'没有排期'}，这次不重复发。`);
     }
     await this.arm();
     return fired>0;

@@ -1,7 +1,7 @@
 // 周日「下周清单」：数据包入口 → 出图任务 → 终审 → 周日 20:00 中英文各发一条。工作日流程的行为见 flow.test.mjs，不在这里重复。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Flow,GRACE_MS} from '../cloud/flow.mjs';
+import {Flow,GRACE_MS,WEEKLY_CAPTION} from '../cloud/flow.mjs';
 import {TradeDesk} from '../cloud/worker.mjs';
 import {weeklyDay,weeklyDueAt,dueAt} from '../calendar.mjs';
 
@@ -88,12 +88,12 @@ test('不是周日的日子不接收',async()=>{
   assert.equal(await h.flow.getFlow('2026-10-24'),undefined);
 });
 
-test('出图完成：先发中英文正式稿和程序提示，再发终审按钮；不带台账链接，标题不是「第N期」',async()=>{
+test('出图完成：先发固定帖子文字和程序提示，再发终审按钮；不带台账链接，标题不是「第N期」',async()=>{
   const h=harness();
   await toAwaitingFinal(h);
   const t=texts(h);
-  assert.ok(t.some(x=>x.includes('周日下周清单 中文正式稿')&&x.includes('【$BTC下周清单】')));
-  assert.ok(t.some(x=>x.includes('周日下周清单 英文正式稿')&&x.includes('【$BTC Week Ahead】')));
+  assert.ok(t.some(x=>x.includes('周日下周清单 帖子文字')&&x.includes(WEEKLY_CAPTION)));
+  assert.ok(!t.some(x=>x.includes('中文正式稿')),'周日不再有两份正式稿');
   assert.ok(t.some(x=>x.includes('代币解锁数据')),'程序提示要转给审核人');
   assert.ok(!t.some(x=>x.includes('notion.example')),'周日清单没有台账链接');
   assert.ok(!t.some(x=>/第undefined期|第null期/.test(x)));
@@ -114,13 +114,14 @@ test('图片没收齐不能进终审',async()=>{
   assert.ok(texts(h).some(x=>x.includes('2张图片没有收齐')));
 });
 
-test('终审通过：不写台账、不占期号，中英文都排在周日 20:00，闹钟指向 20:00',async()=>{
+test('终审通过：不写台账、不占期号，只排一条帖子（中英两张海报）在周日 20:00，闹钟指向 20:00',async()=>{
   const h=harness();
   await toAwaitingFinal(h);
   assert.equal(await h.flow.finalApprove(SUN,1),true);
   const flow=await h.flow.getFlow(SUN);
   assert.equal(flow.slots.zh.due,Date.parse(SUN+'T20:00:00+08:00'));
-  assert.equal(flow.slots.en.due,Date.parse(SUN+'T20:00:00+08:00'));
+  assert.equal(flow.slots.en,undefined,'周日只有一条帖子');
+  assert.deepEqual(flow.slots.zh.targets,['x']);
   assert.equal(flow.slots.zh.status,'scheduled');
   assert.equal(flow.ledger_job,undefined);
   assert.equal((await h.flow.s.get('issues'))?.[SUN],undefined);
@@ -137,7 +138,7 @@ test('退回：不排发布，告诉怎么重新出一份',async()=>{
   assert.equal(h.alarm(),null);
 });
 
-test('到点演练：中英文各一次，只发一张图的帖子也不报错，闹钟重复触发不重复',async()=>{
+test('到点演练：一条帖子带两张海报，不调用X，闹钟重复触发不重复',async()=>{
   const h=harness();
   await toAwaitingFinal(h);
   await h.flow.finalApprove(SUN,1);
@@ -145,13 +146,11 @@ test('到点演练：中英文各一次，只发一张图的帖子也不报错�
   await h.flow.alarm();
   await h.flow.alarm();
   const dry=texts(h).filter(x=>x.includes('【演练，未发推】'));
-  assert.equal(dry.length,2);
-  assert.ok(dry[0].includes('周日下周清单中文版')&&dry[0].includes('附1张图'));
-  assert.ok(dry[1].includes('周日下周清单英文版'));
+  assert.equal(dry.length,1);
+  assert.ok(dry[0].includes('周日下周清单周日海报帖')&&dry[0].includes('附2张图')&&dry[0].includes(WEEKLY_CAPTION));
   assert.equal(h.log.x.length,0);
 });
-
-test('开关打开：中英文各发一条，每条只带自己那张图；限一个 cashtag',async()=>{
+test('开关打开：一条帖子，固定文案，带中英两张海报，只有一个 cashtag',async()=>{
   const h=harness({env:{PUBLISH_ENABLED:'true'}});
   await h.flow.s.put('x-account',{id:'1',username:'Uncle_Onchain'});
   h.flow.d.provider=async(url,options)=>{
@@ -168,13 +167,14 @@ test('开关打开：中英文各发一条，每条只带自己那张图；限�
   await h.flow.finalApprove(SUN,1);
   h.state.now=Date.parse(SUN+'T20:00:05+08:00');
   await h.flow.alarm();
+  await h.flow.alarm();
   const posts=h.log.x.filter(c=>c.url.endsWith('/tweets'));
-  assert.equal(posts.length,2);
-  const bodies=posts.map(p=>JSON.parse(p.body));
-  assert.ok(bodies[0].text.startsWith('【$BTC下周清单】'));
-  assert.ok(bodies[1].text.startsWith('【$BTC Week Ahead】'));
-  assert.ok(bodies.every(b=>b.media.media_ids.length===1));
+  assert.equal(posts.length,1);
+  const body=JSON.parse(posts[0].body);
+  assert.equal(body.text,WEEKLY_CAPTION);
+  assert.equal(body.media.media_ids.length,2);
   assert.equal(h.log.x.filter(c=>c.url.endsWith('/media/upload')).length,2);
+  assert.equal((await h.flow.getFlow(SUN)).slots.zh.status,'posted');
 });
 
 test('错过 20:00 超过 60 分钟：问你要不要补发，不擅自补',async()=>{
@@ -209,15 +209,13 @@ function rig(extraEnv={}) {
 }
 const post=(body,headers={Authorization:'Bearer pipe'})=>new Request('https://desk.test/pipeline/weekly',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(body)});
 
-test('/pipeline/weekly：要流水线密钥；日期必须是今天；标题和英文稿检查',async()=>{
+test('/pipeline/weekly：要流水线密钥；日期必须是今天；数据包格式检查',async()=>{
   const r=rig();
   try {
     const ok={day:SUN,pack:PACK,zh_post:ZH,en_post:EN};
     assert.equal((await r.desk.fetch(post(ok,{}))).status,403);
     assert.equal((await r.desk.fetch(post(ok,{Authorization:'Bearer wrong'}))).status,403);
     assert.equal((await r.desk.fetch(post({...ok,day:'2026-10-18',pack:{...PACK,day:'2026-10-18'}}))).status,400);
-    assert.equal((await r.desk.fetch(post({...ok,zh_post:'没有标题'}))).status,400);
-    assert.equal((await r.desk.fetch(post({...ok,en_post:EN+' 好'}))).status,400);
     assert.equal((await r.desk.fetch(post({...ok,pack:{...PACK,kind:'x'}}))).status,400);
     assert.equal(r.entries.get('flow:'+SUN),undefined,'校验没过不能落库');
     const res=await r.desk.fetch(post(ok));

@@ -124,10 +124,14 @@ Telegram文字热点流程：`/hotspots` → 粘贴一段或多段文字 → `/d
 | `DAILY_TARGETS` | `tg,x` | 工作日计划发哪里：`x`、`tg`，可写 `tg,x`；不写默认只发 X |
 | `WEEKLY_TARGETS` | `x` | 周日下周清单发哪里 |
 | `TG_CHANNEL` | `@UncleOnchain` | 频道用户名（公开频道）；机器人要是管理员并勾选「发布消息」 |
-| `TG_CHANNEL_LANGS` | `zh` | 进频道的语言 |
-| `DAILY_X_LANGS` / `WEEKLY_X_LANGS` | `en` / （不写=中英都发） | 发 X 的语言。当前：工作日中文进频道、英文发 X；周日中英都发 X |
+| `TG_CHANNEL_LANGS` | `zh,en` | 进频道的语言：中文 20:00、英文 21:00 |
+| `DAILY_X_LANGS` / `WEEKLY_X_LANGS` | `en` / （不写=中英都发） | 发 X 的语言。当前：工作日中文只进频道，英文进频道并继续发 X |
 
 - 频道那条 = 竖版海报（没有就用横版）+ 正文。正文 ≤1024 字当图片说明，一条消息发出；更长就先发图、再发一条正文。图片超出 Telegram 照片限制（宽+高 >10000、长宽比 >20、>10MB）自动改发原文件。
 - 一个发布位可以有多个目标，每个目标单独记进度：频道成功、X 失败时，`/retrypost` 只补 X，不会重复发频道。网络超时 / 5xx 记为「未知」，先去频道确认再 `/retrypost`；403/400 记为失败并写明原因。
 - 总开关 `PUBLISH_ENABLED` 同时管 X 和频道；关闭时两边都只演练。
 - Telegram 里发 `/channelcheck`：只读检查机器人是不是频道管理员、能不能发消息，不会往频道发任何东西。
+
+### 周日清单发帖形态（2026-10-26 改）
+
+周日只发 **一条** X 帖子，带中、英两张海报，帖子文字固定为 `cloud/flow.mjs` 里的 `WEEKLY_CAPTION`（`【$BTC` + 中英各一句 + 👇`】`），不再有逐条的正式稿，也不再有中英两条。海报内容、排版全部由程序按日历和台账数据出图（`poster/render.py`），模型不参与。`/pipeline/weekly` 不再校验帖子文字；`weekly_collect.py` 仍会算出旧版文字，仅留作参考，不发布。周日发布目标只看 `WEEKLY_TARGETS`（含 `x` 才发）。

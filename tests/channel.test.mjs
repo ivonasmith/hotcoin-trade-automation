@@ -141,39 +141,34 @@ test('机器人没有发帖权限（403）：明确失败，原因写清楚，�
   assert.equal(h.log.x.length,0);
 });
 
-test('周日默认发 X：中英各一条，不进频道',async()=>{
+test('周日默认发 X：一条帖子带中英两张海报，不进频道',async()=>{
   const h=harness({now:Date.parse(SUN+'T15:00:00+08:00')});
   await xReady(h);
   await seedWeekly(h);
   await h.flow.schedule(SUN);
   const flow=await h.flow.getFlow(SUN);
-  assert.deepEqual(Object.keys(flow.slots),['zh','en']);
+  assert.deepEqual(Object.keys(flow.slots),['zh']);
   assert.deepEqual(flow.slots.zh.targets,['x']);
   h.state.now=weeklyDueAt(SUN,'zh')+5000;
   await h.flow.alarm();
-  assert.equal(h.log.x.filter(c=>c.url.endsWith('/tweets')).length,2);
+  const posts=h.log.x.filter(c=>c.url.endsWith('/tweets'));
+  assert.equal(posts.length,1);
+  assert.equal(JSON.parse(posts[0].body).media.media_ids.length,2);
   assert.equal(h.log.photos.length,0);
 });
 
-test('频道 + X 同时：X 失败后重试，频道那条不重复',async()=>{
-  const h=harness({now:Date.parse(SUN+'T15:00:00+08:00'),env:{WEEKLY_TARGETS:'tg,x',TG_CHANNEL_LANGS:'zh,en'}});
+test('周日 X 失败后重试：同一条帖子只补发一次',async()=>{
+  const h=harness({now:Date.parse(SUN+'T15:00:00+08:00')});
   await xReady(h);
   await seedWeekly(h);
   await h.flow.schedule(SUN);
   h.state.tweetError=Object.assign(Error('x'),{status:403,providerMessage:'duplicate'});
   h.state.now=weeklyDueAt(SUN,'zh')+5000;
   await h.flow.alarm();
-  const flow=await h.flow.getFlow(SUN);
-  assert.equal(flow.slots.zh.status,'failed');
-  assert.equal(flow.slots.en.status,'failed');
-  assert.equal(h.log.photos.length,2,'中英各进频道一次');
+  assert.equal((await h.flow.getFlow(SUN)).slots.zh.status,'failed');
   h.state.tweetError=null;
   await h.flow.retryPost(SUN);
-  const after=await h.flow.getFlow(SUN);
-  assert.equal(after.slots.zh.status,'posted');
-  assert.equal(after.slots.en.status,'posted');
-  assert.equal(h.log.photos.length,2,'重试不重复进频道');
-  assert.equal(h.log.x.filter(c=>c.url.endsWith('/tweets')).length,4,'X 失败两次 + 重试两次');
+  assert.equal((await h.flow.getFlow(SUN)).slots.zh.status,'posted');
 });
 
 test('目标写了频道但没配 TG_CHANNEL：不排任何发布，并说明原因',async()=>{
@@ -199,7 +194,7 @@ test('总开关关闭：频道也只演练，不发图',async()=>{
 test('终审提示按目标写发布安排',async()=>{
   const h=harness();
   assert.equal(h.flow.planText({kind:'daily'}),'中文20:00发TG频道');
-  assert.equal(h.flow.planText({kind:'weekly'}),'中文20:00发X；英文20:00发X');
+  assert.equal(h.flow.planText({kind:'weekly'}),'中英两张海报同一条帖子20:00发X');
 });
 
 test('图片能否当照片发：尺寸、比例、体积',()=>{
@@ -251,23 +246,26 @@ test('/channelcheck：只读检查，管理员且能发消息才说可以发帖'
   } finally { globalThis.fetch=original; }
 });
 
-test('日常配置：中文进频道、英文发 X；周日中英都发 X',async()=>{
-  const h=harness({env:{DAILY_TARGETS:'tg,x',DAILY_X_LANGS:'en',TG_CHANNEL_LANGS:'zh',WEEKLY_TARGETS:'x'},now:Date.parse(DAY+'T10:00:00+08:00')});
+test('当前线上配置：中文 20:00 进频道；英文 21:00 进频道并继续发 X；周日一条帖子发 X',async()=>{
+  const h=harness({env:{DAILY_TARGETS:'tg,x',DAILY_X_LANGS:'en',TG_CHANNEL_LANGS:'zh,en',WEEKLY_TARGETS:'x'}});
   await xReady(h);
   await seedDaily(h);
   await h.flow.schedule(DAY);
   const flow=await h.flow.getFlow(DAY);
   assert.deepEqual(flow.slots.zh.targets,['tg']);
-  assert.deepEqual(flow.slots.en.targets,['x']);
+  assert.deepEqual(flow.slots.en.targets,['tg','x']);
   h.state.now=dueAt(DAY,'zh')+1000;
   await h.flow.alarm();
   assert.equal(h.log.photos.length,1);
+  assert.equal(h.log.photos[0].name,'zh_m.png');
   assert.equal(h.log.x.length,0,'中文不发 X');
   h.state.now=dueAt(DAY,'en')+1000;
   await h.flow.alarm();
+  assert.equal(h.log.photos.length,2);
+  assert.equal(h.log.photos[1].name,'en_m.png');
+  assert.equal(h.log.photos[1].caption,EN_SHORT);
   const posts=h.log.x.filter(c=>c.url.endsWith('/tweets'));
   assert.equal(posts.length,1);
   assert.ok(JSON.parse(posts[0].body).text.startsWith('Today I am placing'));
-  assert.equal(h.flow.plan('weekly').zh[0],'x');
-  assert.deepEqual(Object.keys(h.flow.plan('weekly')),['zh','en']);
+  assert.deepEqual(h.flow.plan('weekly'),{zh:['x']});
 });
