@@ -269,6 +269,28 @@ test('大快照先压缩再给模型，且提示词标注已压缩',async()=>{
     assert.equal(entries.get('draft:'+day).status,'pending_text_review');
   } finally {restore();}
 });
+test('/modeltest：列出平台模型，分别给短请求和整篇长度的耗时，帮你判断是平台慢还是模型慢；陌生人不能触发',async()=>{
+  const {desk,calls,restore}=draftSetup(n=>Response.json({id:'x',choices:[{message:{content:'OK'}}],usage:{completion_tokens:n%2?3:900}}));
+  const old=globalThis.fetch;
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).endsWith('/v1/models')) return Response.json({data:[{id:'claude-sonnet-5-5'},{id:'claude-haiku-5-5'},{id:'gpt-x'}]});
+    return old(url,options);
+  };
+  const send=(id,text,actor=123)=>desk.fetch(new Request('https://desk.test/telegram/webhook',{
+    method:'POST',headers:{'Content-Type':'application/json','X-Telegram-Bot-Api-Secret-Token':'hook-secret'},
+    body:JSON.stringify({update_id:id,message:{chat:{id:actor,type:'private'},from:{id:actor},text}})}));
+  try {
+    await send(1,'/modeltest claude-haiku-5-5',999);
+    assert.equal(calls.nebula.length,0);
+    await send(2,'/modeltest claude-haiku-5-5');
+    assert.equal(calls.nebula.length,2);
+    assert.equal(calls.nebula[0].model,'claude-haiku-5-5');
+    const final=calls.telegram.at(-1).text;
+    assert.equal(final.includes('Claude系：claude-sonnet-5-5、claude-haiku-5-5'),true);
+    assert.equal(final.includes('短请求')&&final.includes('整篇长度')&&final.includes('个/秒'),true);
+    assert.equal(final.includes('sk-nebula-secret'),false);
+  } finally {globalThis.fetch=old;restore();}
+});
 test('请求超时如实显示为超时而不是HTTP 502，并自动重试一次',async()=>{
   const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Object.assign(new Error('timed out'),{name:'TimeoutError'});});
   try {

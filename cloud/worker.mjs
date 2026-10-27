@@ -545,6 +545,43 @@ export class TradeDesk {
     return page('X授权完成',`<p>@${escapeHTML(me.data.username)} 已连接，尚未发布任何推文。</p><p><a href="/admin">返回管理页</a></p>`,200,
       {'Set-Cookie':'desk_oauth=; HttpOnly; Secure; SameSite=Lax; Path=/oauth/x; Max-Age=0'});
   }
+  // /modeltest [model ...]: is it the platform or the model? Lists what ApiNebula offers, then times a tiny request and a
+  // post-length request per model, from the same network path the real drafting uses.
+  async modelTest(env,reply,names) {
+    if(!env.APINEBULA_API_KEY) { await reply('还没有填ApiNebula令牌。'); return; }
+    const headers={Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'};
+    const tested=(names.length?names:[env.APINEBULA_MODEL||DEFAULT_MODEL]).slice(0,3);
+    await reply(`开始测试 ${tested.join('、')}：每个模型先发一个很短的请求，再发一个整篇长度的写作请求，最长各等90秒，大约1～4分钟出结果。`);
+    const lines=[];
+    try {
+      const listed=await provider('https://apinebula.ai/v1/models',{method:'GET',headers},20000);
+      const ids=(listed.data||[]).map(item=>String(item?.id||'')).filter(Boolean);
+      const claude=ids.filter(id=>/claude/i.test(id)).slice(0,20);
+      lines.push(`平台可用模型共${ids.length}个；其中Claude系：${claude.length?claude.join('、'):'（没有）'}`);
+    } catch(error) {
+      const failure=apiNebulaFailure(error);
+      lines.push(`模型清单取不到：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}`);
+    }
+    const timed=async(model,prompt,maxTokens)=>{
+      const started=Date.now();
+      try {
+        const answer=await provider('https://apinebula.ai/v1/chat/completions',{method:'POST',headers,
+          body:JSON.stringify({model,max_tokens:maxTokens,messages:[{role:'user',content:prompt}]})},90000);
+        const seconds=(Date.now()-started)/1000,out=answer.usage?.completion_tokens;
+        return {ok:true,seconds,out,text:answer.choices?.[0]?.message?.content||''};
+      } catch(error) {
+        return {ok:false,seconds:(Date.now()-started)/1000,reason:apiNebulaFailure(error).reason,label:apiNebulaFailure(error).label};
+      }
+    };
+    for(const model of tested) {
+      const short=await timed(model,'Reply OK',8);
+      const long=await timed(model,'用中文写一篇约700字的加密市场日评，分三段，口语化，不要标题。',1500);
+      const part=(name,r)=>r.ok?`${name}${r.seconds.toFixed(1)}秒${r.out?`（${r.out}个token，约${Math.round(r.out/r.seconds)}个/秒）`:''}`:`${name}失败，${r.seconds.toFixed(0)}秒后：${r.label}`;
+      lines.push(`${model}\n  ${part('短请求 ',short)}\n  ${part('整篇长度 ',long)}`);
+    }
+    lines.push('怎么看：短请求也慢或失败 = 平台/网关的问题，换模型没用；短请求很快、整篇很慢 = 这个模型出字慢，换个更快的模型。想试别的模型，发 /modeltest 模型名 （最多3个，空格隔开）。');
+    await reply(lines.join('\n\n'));
+  }
   // Read-only: is the bot an admin of the channel and allowed to post? Posts nothing.
   async channelCheck(env,reply) {
     const channel=env.TG_CHANNEL;
@@ -588,6 +625,10 @@ export class TradeDesk {
     }
     if(text==='/reissue') {
       await this.flow(env).reissue(beijingDay());
+      return json({ok:true});
+    }
+    if(text==='/modeltest' || text.startsWith('/modeltest ')) {
+      await this.modelTest(env,reply,text.split(/\s+/).slice(1).filter(Boolean));
       return json({ok:true});
     }
     if(text==='/channelcheck') {
