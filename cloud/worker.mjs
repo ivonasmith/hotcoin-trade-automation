@@ -695,6 +695,7 @@ export class TradeDesk {
     }
     await this.ctx.storage.put('draft:'+day,{status:'generating',started:Date.now()});
     let promptChars=0,which=draftProvider(env);
+    const startedAt=Date.now();
     try {
       const snapshot=await this.ctx.storage.get('snapshot:'+day);
       const compact=snapshot?compactSnapshot(snapshot):null;
@@ -736,7 +737,7 @@ export class TradeDesk {
       const failure=({anthropic:anthropicFailure,bedrock:bedrockFailure,gemini:geminiFailure}[which]||apiNebulaFailure)(error);
       await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),provider:which,
         model:(which==='anthropic'?env.ANTHROPIC_MODEL:which==='bedrock'?(env.BEDROCK_MODEL||BEDROCK_MODEL):which==='gemini'?(env.GEMINI_MODEL||GEMINI_MODEL):env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
-      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}${error?.tried?.length?`备用通道（${error.tried.join('、')}）也没成功；`:''}${fallbackChain(env,which).length?'':'没有配置备用模型通道；在后台“首选撰稿模型”旁填一个Claude官方或Bedrock的密钥后，这种情况会自动改走备用；'}可发送 /draft 再试。`});
+      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}${error?.tried?.length?`备用通道（${error.tried.join('、')}）也没成功；`:''}${fallbackChain(env,which).length?'':'没有配置备用模型通道；在后台“首选撰稿模型”旁填一个Claude官方或Bedrock的密钥后，这种情况会自动改走备用；'}可发送 /draft 再试。（诊断：送进模型的材料约${promptChars}字，共等了${Math.round((Date.now()-startedAt)/1000)}秒）`});
     }
     return json({ok:true});
   }
