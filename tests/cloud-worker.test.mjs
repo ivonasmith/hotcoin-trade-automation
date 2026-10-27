@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {TradeDesk} from '../cloud/worker.mjs';
+import {TradeDesk,customUrl} from '../cloud/worker.mjs';
 import {beijingDay} from '../calendar.mjs';
 
 function setup(overrides={}) {
@@ -290,6 +290,66 @@ test('/modeltest：列出平台模型，分别给短请求和整篇长度的耗�
     assert.equal(final.includes('短请求')&&final.includes('整篇长度')&&final.includes('个/秒'),true);
     assert.equal(final.includes('sk-nebula-secret'),false);
   } finally {globalThis.fetch=old;restore();}
+});
+test('真实环境：/draft 只登记任务并立刻回复，撰稿在闹钟里跑；闹钟重复触发不会写两份',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>Response.json({choices:[{message:{content:'审核正文：ok\n\n送审备注：ok'}}]}));
+  let alarmAt=null;
+  desk.ctx.storage.setAlarm=async t=>{alarmAt=t;};
+  desk.ctx.storage.deleteAlarm=async()=>{};
+  try {
+    const response=await desk.makeDraft(123,desk.env);
+    assert.equal(response.status,200);
+    assert.equal(calls.nebula.length,0,'webhook里不等模型');
+    assert.equal(entries.get('draft:'+day).status,'generating');
+    assert.ok(alarmAt!==null);
+    assert.equal(calls.telegram.at(-1).text.includes('开始生成送审稿'),true);
+    await desk.alarm();
+    assert.equal(calls.nebula.length,1);
+    assert.equal(entries.get('draft:'+day).status,'pending_text_review');
+    assert.equal(entries.has('draft-job'),false);
+    await desk.alarm();
+    assert.equal(calls.nebula.length,1,'任务已取走，不重复写');
+  } finally {restore();}
+});
+test('卡死的“生成中”超过8分钟会放行重来，不会永远提示请稍候',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>Response.json({choices:[{message:{content:'审核正文：ok\n\n送审备注：ok'}}]}));
+  try {
+    entries.set('draft:'+day,{status:'generating',started:Date.now()-60000});
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,0);
+    assert.equal(calls.telegram.at(-1).text.includes('正在生成'),true);
+    entries.set('draft:'+day,{status:'generating',started:Date.now()-9*60000});
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,1);
+  } finally {restore();}
+});
+test('第三方备用平台：ApiNebula超时后按填写的接口地址、密钥、模型名出稿；地址必须是https',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Object.assign(new Error('timed out'),{name:'TimeoutError'});},
+    {CUSTOM_AI_BASE_URL:'https://relay.example.com/v1/',CUSTOM_AI_API_KEY:'sk-relay-secret',CUSTOM_AI_MODEL:'claude-sonnet-4-6'});
+  const inner=globalThis.fetch,seen=[];
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).startsWith('https://relay.example.com/')) {
+      seen.push({url:String(url),auth:options.headers.Authorization,body:JSON.parse(options.body)});
+      return Response.json({choices:[{message:{content:'审核正文：备用写的\n\n送审备注：ok'}}]});
+    }
+    return inner(url,options);
+  };
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(seen.length,1);
+    assert.equal(seen[0].url,'https://relay.example.com/v1/chat/completions');
+    assert.equal(seen[0].auth,'Bearer sk-relay-secret');
+    assert.equal(seen[0].body.model,'claude-sonnet-4-6');
+    assert.equal(seen[0].body.messages.length,1);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.status,'pending_text_review');
+    assert.equal(draft.provider,'custom');
+    assert.equal(calls.telegram.at(-1).text.includes('已自动改用第三方备用平台'),true);
+    assert.equal(calls.telegram.at(-1).text.includes('sk-relay-secret'),false);
+  } finally {globalThis.fetch=inner;restore();}
+  assert.equal(customUrl('http://relay.example.com/v1'),null);
+  assert.equal(customUrl('javascript:alert(1)'),null);
+  assert.equal(customUrl('https://relay.example.com/v1/chat/completions'),'https://relay.example.com/v1/chat/completions');
 });
 test('请求超时如实显示为超时而不是HTTP 502，并自动重试一次',async()=>{
   const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Object.assign(new Error('timed out'),{name:'TimeoutError'});});

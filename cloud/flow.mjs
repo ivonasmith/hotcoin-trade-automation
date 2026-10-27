@@ -408,6 +408,8 @@ export class Flow {
       const flow=await this.getFlow(item.day);
       if(flow && flow.rev===item.rev && flow.status==='poster_pending' && (next===null || item.at<next)) next=item.at;
     }
+    const job=await this.s.get('draft-job');
+    if(job && (next===null || job.at<next)) next=job.at;
     if(next!==null && this.s.setAlarm) await this.s.setAlarm(Math.max(next,this.now()+1000));
     else if(next===null && this.s.deleteAlarm) await this.s.deleteAlarm();
   }

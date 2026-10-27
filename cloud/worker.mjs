@@ -66,6 +66,7 @@ async function withRetry(run,attempts=2,delayMs=1500) {
     }
   }
 }
+const customFailure=error=>{const f=apiNebulaFailure(error);return {...f,reason:f.reason.replace(/ApiNebula/g,'第三方平台')};};
 function anthropicFailure(error) {
   const status=Number(error?.status)||null;
   const byKind={timeout:'Claude官方API响应超时，没有在等待时间内返回。',
@@ -235,43 +236,56 @@ async function geminiDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt
 }
 // Explicit AI_PROVIDER wins. When unset, keep today's behaviour: ApiNebula if configured, else the official API.
 function draftProvider(env) {
-  if(['anthropic','apinebula','gemini','bedrock'].includes(env.AI_PROVIDER)) return env.AI_PROVIDER;
+  if(['anthropic','apinebula','gemini','bedrock','custom'].includes(env.AI_PROVIDER)) return env.AI_PROVIDER;
   if(env.APINEBULA_API_KEY) return 'apinebula';
   if(env.BEDROCK_API_KEY) return 'bedrock';
   if(env.ANTHROPIC_API_KEY) return 'anthropic';
   return 'apinebula';
 }
 async function generateDraft(env,hotspots,which,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={}) {
-  const make={anthropic:anthropicDraft,bedrock:bedrockDraft,gemini:geminiDraft}[which]||apiNebulaDraft;
+  const make={anthropic:anthropicDraft,bedrock:bedrockDraft,gemini:geminiDraft,custom:customDraft}[which]||apiNebulaDraft;
   return {...await make(env,hotspots,system,promptFn,opts),provider:which};
 }
 // Other Claude-class channels that have a key, tried in this order when the chosen one fails (a gateway can be down for
 // an hour; the reviewer should not have to retry by hand). Gemini is not a silent fallback: it writes a different voice.
-const FALLBACKS=[['bedrock','BEDROCK_API_KEY'],['anthropic','ANTHROPIC_API_KEY']];
+const FALLBACKS=[['custom','CUSTOM_AI_API_KEY'],['bedrock','BEDROCK_API_KEY'],['anthropic','ANTHROPIC_API_KEY']];
 export function fallbackChain(env,which) {
   return FALLBACKS.filter(([name,key])=>name!==which && env[key]).map(([name])=>name);
 }
-const PROVIDER_LABEL={anthropic:'Claude官方',bedrock:'亚马逊Bedrock',apinebula:'ApiNebula',gemini:'Gemini'};
-async function apiNebulaDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={}) {
-  if(!env.APINEBULA_API_KEY) throw Error('未配置ApiNebula');
-  const model=env.APINEBULA_MODEL||DEFAULT_MODEL;
+const PROVIDER_LABEL={anthropic:'Claude官方',bedrock:'亚马逊Bedrock',apinebula:'ApiNebula',gemini:'Gemini',custom:'第三方备用平台'};
+const PLATFORMS={
+  apinebula:env=>({name:'ApiNebula',url:'https://apinebula.ai/v1/chat/completions',key:env.APINEBULA_API_KEY,model:env.APINEBULA_MODEL||DEFAULT_MODEL}),
+  custom:env=>({name:'第三方平台',url:customUrl(env.CUSTOM_AI_BASE_URL),key:env.CUSTOM_AI_API_KEY,model:env.CUSTOM_AI_MODEL||DEFAULT_MODEL})
+};
+// Any OpenAI-compatible gateway: base URL like https://example.com/v1 -> .../v1/chat/completions. https only.
+export function customUrl(base) {
+  const text=String(base||'').trim().replace(/\/+$/,'');
+  if(!/^https:\/\/[a-z0-9.-]+(:\d+)?(\/[\w./-]*)?$/i.test(text)) return null;
+  return text.endsWith('/chat/completions')?text:text+'/chat/completions';
+}
+async function compatDraft(which,env,hotspots,system,promptFn,opts={}) {
+  const cfg=PLATFORMS[which](env);
+  if(!cfg.key) throw Error(`未配置${cfg.name}`);
+  if(!cfg.url) throw Error('第三方平台的接口地址格式不对（应为 https://…/v1）');
   const request={
-    method:'POST',headers:{Authorization:`Bearer ${env.APINEBULA_API_KEY}`,'Content-Type':'application/json'},
-    body:JSON.stringify({model,max_tokens:4000,
+    method:'POST',headers:{Authorization:`Bearer ${cfg.key}`,'Content-Type':'application/json'},
+    body:JSON.stringify({model:cfg.model,max_tokens:4000,
       // The gateway forwards to Claude's native API, which rejects a system-role message (HTTP 400, 2026-10-26).
       // The rules therefore ride at the top of the single user message instead.
       messages:[{role:'user',content:`以下是你必须遵守的工作规则：\n\n${system}\n\n==========\n以下是今天的输入：\n\n${promptFn(hotspots)}`}]})};
-  // Drafting is slower than the 8-token connection check (a full post is 1.5-3k tokens), so allow 75s per try. Retry once on
-  // transient failures, unless another channel is waiting to take over (then fail fast and hand over).
+  // A full post is 1.5-3k tokens (up to ~2 min at a busy hour). The wait runs inside an alarm, not a Telegram webhook, so it can be long.
+  // Retry once on transient failures, unless another channel is waiting to take over (then fail fast and hand over).
   const result=await withRetry(async()=>{
-    const answer=await provider('https://apinebula.ai/v1/chat/completions',request,75000);
+    const answer=await provider(cfg.url,request,opts.timeoutMs||150000);
     const text=answer.choices?.[0]?.message?.content;
     if(typeof text!=='string' || !text.trim()) throw Error('模型未返回草稿');
     return answer;
   },opts.attempts||2);
   const content=result.choices[0].message.content;
-  return {content:content.trim(),model,usage:result.usage||null,truncated:result.choices[0].finish_reason==='length'};
+  return {content:content.trim(),model:cfg.model,usage:result.usage||null,truncated:result.choices[0].finish_reason==='length'};
 }
+const apiNebulaDraft=(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={})=>compatDraft('apinebula',env,hotspots,system,promptFn,opts);
+const customDraft=(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={})=>compatDraft('custom',env,hotspots,system,promptFn,opts);
 export default {
   async fetch(request,env) {
     // One durable desk owns state; tokens and drafts have no public read route.
@@ -295,7 +309,13 @@ export class TradeDesk {
   }
   // Durable Object alarm: publish slots (zh 20:00 / en 21:00 Beijing) and the poster-job watchdog.
   async alarm() {
-    await this.flow(await this.effectiveEnv()).alarm();
+    const env=await this.effectiveEnv();
+    const job=await this.ctx.storage.get('draft-job');
+    if(job) {
+      await this.ctx.storage.delete('draft-job'); // taken: a retried alarm must not write the draft twice
+      try { await this.runDraft(job.chat,env,job.day); } catch { /* runDraft reports its own failures */ }
+    }
+    await this.flow(env).alarm();
   }
   async jobs(request,url,path,env) {
     const flow=this.flow(env);
@@ -391,7 +411,7 @@ export class TradeDesk {
         const raw=await request.text();
         if(raw.length>20000) return json({ok:false},413);
         const form=new URLSearchParams(raw),config={};
-        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','GEMINI_MODEL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER','GITHUB_DISPATCH_TOKEN','GITHUB_REPO']) {
+        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','GEMINI_MODEL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','CUSTOM_AI_BASE_URL','CUSTOM_AI_API_KEY','CUSTOM_AI_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER','GITHUB_DISPATCH_TOKEN','GITHUB_REPO']) {
           const value=form.get(name)?.trim();
           if(value) {
             if(value.length>2000 || /[\r\n]/.test(value)) return json({ok:false,error:'字段格式有误'},400);
@@ -402,6 +422,8 @@ export class TradeDesk {
             if(name==='BEDROCK_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'Bedrock模型编号格式有误'},400);
             if(name==='GITHUB_REPO' && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return json({ok:false,error:'仓库名格式应为 owner/repo'},400);
             if(name==='GEMINI_MODEL' && !/^[a-zA-Z0-9._-]+$/.test(value)) return json({ok:false,error:'Gemini模型名格式有误'},400);
+            if(name==='CUSTOM_AI_BASE_URL' && !customUrl(value)) return json({ok:false,error:'接口地址须是 https://… 开头（例如 https://xxx.com/v1）'},400);
+            if(name==='CUSTOM_AI_MODEL' && !/^[a-zA-Z0-9._:/-]+$/.test(value)) return json({ok:false,error:'模型名格式有误'},400);
             if(name==='APINEBULA_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'ApiNebula模型名格式有误'},400);
             config[name]=value;
           }
@@ -498,12 +520,15 @@ export class TradeDesk {
       ['BEDROCK_MODEL','Bedrock模型编号（默认 us.anthropic.claude-sonnet-5-5）','text'],
       ['GITHUB_DISPATCH_TOKEN','（选填）GitHub令牌：让海报任务立即启动而不是等5分钟轮询（需 Actions 读写权限）','password'],
       ['GITHUB_REPO','（选填）GitHub仓库 owner/repo（默认 ivonasmith/hotcoin-trade-automation）','text'],
+      ['CUSTOM_AI_BASE_URL','第三方备用平台：接口地址（OpenAI兼容，形如 https://xxx.com/v1）','text'],
+      ['CUSTOM_AI_API_KEY','第三方备用平台：API密钥','password'],
+      ['CUSTOM_AI_MODEL','第三方备用平台：模型名（如 claude-sonnet-4-6，以平台模型广场为准）','text'],
       ['APINEBULA_API_KEY','ApiNebula API令牌','password'],
       ['APINEBULA_MODEL','ApiNebula模型名（按模型广场填写）','text']]
       .map(([name,label,type])=>`<p><label>${label}<br><input style="width:95%;font:inherit;padding:8px" name="${name}" type="${type}" autocomplete="off" placeholder="${env[name]?'已保存；留空保持':'待填写'}"></label></p>`).join('');
     const selected=env.AI_PROVIDER||'anthropic';
-    const providerName={anthropic:'Claude官方',bedrock:'亚马逊Bedrock',apinebula:'ApiNebula',gemini:'Gemini'}[selected];
-    const providerField=`<p><label>首选撰稿模型<br><select style="width:98%;font:inherit;padding:8px" name="AI_PROVIDER"><option value="apinebula" ${selected==='apinebula'?'selected':''}>ApiNebula（Claude兼容）</option><option value="anthropic" ${selected==='anthropic'?'selected':''}>Claude官方</option><option value="bedrock" ${selected==='bedrock'?'selected':''}>亚马逊Bedrock</option><option value="gemini" ${selected==='gemini'?'selected':''}>Gemini</option></select></label></p>`;
+    const providerName={anthropic:'Claude官方',bedrock:'亚马逊Bedrock',apinebula:'ApiNebula',gemini:'Gemini',custom:'第三方备用平台'}[selected];
+    const providerField=`<p><label>首选撰稿模型<br><select style="width:98%;font:inherit;padding:8px" name="AI_PROVIDER"><option value="apinebula" ${selected==='apinebula'?'selected':''}>ApiNebula（Claude兼容）</option><option value="custom" ${selected==='custom'?'selected':''}>第三方备用平台（OpenAI兼容）</option><option value="anthropic" ${selected==='anthropic'?'selected':''}>Claude官方</option><option value="bedrock" ${selected==='bedrock'?'selected':''}>亚马逊Bedrock</option><option value="gemini" ${selected==='gemini'?'selected':''}>Gemini</option></select></label></p>`;
     return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||DEFAULT_MODEL)}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||DEFAULT_MODEL)}</li><li>亚马逊Bedrock：${env.BEDROCK_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.BEDROCK_REGION||'us-east-2')} · ${escapeHTML(env.BEDROCK_MODEL||BEDROCK_MODEL)}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/bedrock/check">${hidden}<button ${env.BEDROCK_API_KEY?'':'disabled'}>检查Bedrock连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
   }
   async connect(url,env) {
@@ -689,11 +714,23 @@ export class TradeDesk {
       }
     } else if(locked) await this.ctx.storage.delete('flow:'+day); // an unfinished flow belongs to the old draft
     const existing=await this.ctx.storage.get('draft:'+day);
-    if(existing?.status==='generating' && !force) {
+    if(existing?.status==='generating' && !force && Date.now()-(existing.started||0)<8*60000) {
       await telegram(env,'sendMessage',{chat_id:chat,text:'今日送审稿正在生成，请稍候。'});
       return json({ok:true});
     }
     await this.ctx.storage.put('draft:'+day,{status:'generating',started:Date.now()});
+    // In the real Durable Object the writing runs inside an alarm (no Telegram webhook to outlive, up to minutes of wait);
+    // without alarm support (tests) it runs inline.
+    if(this.ctx.storage.setAlarm) {
+      await this.ctx.storage.put('draft-job',{chat,day,at:Date.now()+300});
+      await this.ctx.storage.setAlarm(Date.now()+300);
+      await telegram(env,'sendMessage',{chat_id:chat,text:'开始生成送审稿，通常1～2分钟，最长约5分钟；期间不用重复发 /draft，好了或失败都会通知你。'});
+      return json({ok:true});
+    }
+    return this.runDraft(chat,env,day);
+  }
+  async runDraft(chat,env,day) {
+    const saved=await this.ctx.storage.get('hotspots:'+day);
     let promptChars=0,which=draftProvider(env);
     const startedAt=Date.now();
     try {
@@ -728,15 +765,15 @@ export class TradeDesk {
       const draft={...generated,content,lint,order:plan.order,order_allowed:plan.allowed,status:'pending_text_review',created:Date.now(),day};
       await this.ctx.storage.put('draft:'+day,draft);
       const warning=(lint.length?`\n\n⚠ 格式自检：${lint.join('；')}。可点“退回重写”。`:'')+switched;
-      await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}${warning}\n\n——\n状态：等待文字审核｜模型：${draft.model}`,
+      await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}${warning}\n\n——\n状态：等待文字审核｜模型：${draft.model}｜用时${Math.round((Date.now()-startedAt)/1000)}秒`,
         reply_markup:{inline_keyboard:[[
           {text:'✅ 文字通过',callback_data:`text_ok:${day}`},
           {text:'↩️ 退回重写',callback_data:`text_reject:${day}`}
         ]]}});
     } catch(error) {
-      const failure=({anthropic:anthropicFailure,bedrock:bedrockFailure,gemini:geminiFailure}[which]||apiNebulaFailure)(error);
+      const failure=({anthropic:anthropicFailure,bedrock:bedrockFailure,gemini:geminiFailure,custom:customFailure}[which]||apiNebulaFailure)(error);
       await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),provider:which,
-        model:(which==='anthropic'?env.ANTHROPIC_MODEL:which==='bedrock'?(env.BEDROCK_MODEL||BEDROCK_MODEL):which==='gemini'?(env.GEMINI_MODEL||GEMINI_MODEL):env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
+        model:(which==='anthropic'?env.ANTHROPIC_MODEL:which==='bedrock'?(env.BEDROCK_MODEL||BEDROCK_MODEL):which==='gemini'?(env.GEMINI_MODEL||GEMINI_MODEL):which==='custom'?env.CUSTOM_AI_MODEL:env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
       await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}${error?.tried?.length?`备用通道（${error.tried.join('、')}）也没成功；`:''}${fallbackChain(env,which).length?'':'没有配置备用模型通道；在后台“首选撰稿模型”旁填一个Claude官方或Bedrock的密钥后，这种情况会自动改走备用；'}可发送 /draft 再试。（诊断：送进模型的材料约${promptChars}字，共等了${Math.round((Date.now()-startedAt)/1000)}秒）`});
     }
     return json({ok:true});
