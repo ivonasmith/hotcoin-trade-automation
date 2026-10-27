@@ -420,6 +420,35 @@ test('Gemini返回400时说明可能是地区或模型名问题，且不泄露�
   } finally {globalThis.fetch=inner;restore();}
 });
 
+test('ApiNebula不响应时自动改用已配置密钥的Bedrock出稿，并在稿件里写明；ApiNebula只试一次不再空等',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Object.assign(new Error('timed out'),{name:'TimeoutError'});},
+    {BEDROCK_API_KEY:'ABSKsecretsecretsecret'},null,bedrockOk);
+  try {
+    await desk.makeDraft(123,desk.env);
+    assert.equal(calls.nebula.length,1);
+    assert.equal(calls.bedrock.length,1);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.status,'pending_text_review');
+    assert.equal(draft.provider,'bedrock');
+    assert.equal(calls.telegram.at(-1).text.includes('ApiNebula没有响应，已自动改用亚马逊Bedrock出稿'),true);
+  } finally {restore();}
+});
+test('主通道和备用通道都失败：说明两个都没成功；没有备用密钥时提示怎么配',async()=>{
+  const timeout=()=>{throw Object.assign(new Error('timed out'),{name:'TimeoutError'});};
+  const both=draftSetup(timeout,{BEDROCK_API_KEY:'ABSKsecretsecretsecret'},null,()=>Response.json({message:'nope'},{status:500}));
+  try {
+    await both.desk.makeDraft(123,both.desk.env);
+    const text=both.calls.telegram.at(-1).text;
+    assert.equal(both.entries.get('draft:'+both.day).status,'generation_failed');
+    assert.equal(text.includes('备用通道（亚马逊Bedrock）也没成功'),true);
+  } finally {both.restore();}
+  const alone=draftSetup(timeout);
+  try {
+    await alone.desk.makeDraft(123,alone.desk.env);
+    assert.equal(alone.calls.nebula.length,2);
+    assert.equal(alone.calls.telegram.at(-1).text.includes('没有配置备用模型通道'),true);
+  } finally {alone.restore();}
+});
 const bedrockOk=()=>Response.json({output:{message:{role:'assistant',content:[{reasoningContent:{reasoningText:{text:'想一下'}}},{text:'审核正文：今天不开新单。'},{text:'\n\n送审备注：可发。'}]}},usage:{inputTokens:10,outputTokens:20}});
 test('选Bedrock后用Converse接口出稿：Bearer密钥、区域、模型编号、只取文字块',async()=>{
   const {desk,entries,calls,day,restore}=draftSetup(()=>{throw Error('不应调用ApiNebula');},

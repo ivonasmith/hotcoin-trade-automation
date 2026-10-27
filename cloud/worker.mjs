@@ -241,11 +241,18 @@ function draftProvider(env) {
   if(env.ANTHROPIC_API_KEY) return 'anthropic';
   return 'apinebula';
 }
-async function generateDraft(env,hotspots,which,system=DRAFT_SYSTEM,promptFn=draftPrompt) {
+async function generateDraft(env,hotspots,which,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={}) {
   const make={anthropic:anthropicDraft,bedrock:bedrockDraft,gemini:geminiDraft}[which]||apiNebulaDraft;
-  return {...await make(env,hotspots,system,promptFn),provider:which};
+  return {...await make(env,hotspots,system,promptFn,opts),provider:which};
 }
-async function apiNebulaDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt) {
+// Other Claude-class channels that have a key, tried in this order when the chosen one fails (a gateway can be down for
+// an hour; the reviewer should not have to retry by hand). Gemini is not a silent fallback: it writes a different voice.
+const FALLBACKS=[['bedrock','BEDROCK_API_KEY'],['anthropic','ANTHROPIC_API_KEY']];
+export function fallbackChain(env,which) {
+  return FALLBACKS.filter(([name,key])=>name!==which && env[key]).map(([name])=>name);
+}
+const PROVIDER_LABEL={anthropic:'Claude官方',bedrock:'亚马逊Bedrock',apinebula:'ApiNebula',gemini:'Gemini'};
+async function apiNebulaDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={}) {
   if(!env.APINEBULA_API_KEY) throw Error('未配置ApiNebula');
   const model=env.APINEBULA_MODEL||DEFAULT_MODEL;
   const request={
@@ -254,13 +261,14 @@ async function apiNebulaDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPro
       // The gateway forwards to Claude's native API, which rejects a system-role message (HTTP 400, 2026-10-26).
       // The rules therefore ride at the top of the single user message instead.
       messages:[{role:'user',content:`以下是你必须遵守的工作规则：\n\n${system}\n\n==========\n以下是今天的输入：\n\n${promptFn(hotspots)}`}]})};
-  // Drafting is slower than the 8-token connection check, so allow 45s per try and retry once on transient failures.
+  // Drafting is slower than the 8-token connection check (a full post is 1.5-3k tokens), so allow 75s per try. Retry once on
+  // transient failures, unless another channel is waiting to take over (then fail fast and hand over).
   const result=await withRetry(async()=>{
-    const answer=await provider('https://apinebula.ai/v1/chat/completions',request,45000);
+    const answer=await provider('https://apinebula.ai/v1/chat/completions',request,75000);
     const text=answer.choices?.[0]?.message?.content;
     if(typeof text!=='string' || !text.trim()) throw Error('模型未返回草稿');
     return answer;
-  });
+  },opts.attempts||2);
   const content=result.choices[0].message.content;
   return {content:content.trim(),model,usage:result.usage||null,truncated:result.choices[0].finish_reason==='length'};
 }
@@ -655,7 +663,21 @@ export class TradeDesk {
       const hotspots=saved.parts.join('\n\n');
       const plan=buildOrderPlan(snapshot,day);
       which=draftProvider(env);
-      const generated=await generateDraft(env,hotspots+verified+'\n\n'+orderBlock(plan)+'\n\n'+recordBlock(snapshot?.ledger),which);
+      const input=hotspots+verified+'\n\n'+orderBlock(plan)+'\n\n'+recordBlock(snapshot?.ledger);
+      const backups=fallbackChain(env,which);
+      let generated,primaryError=null;
+      const backupsFailed=[];
+      for(const name of [which,...backups]) {
+        try { generated=await generateDraft(env,input,name,DRAFT_SYSTEM,draftPrompt,{attempts:backups.length && name===which?1:2}); break; }
+        catch(error) {
+          if(name===which) primaryError=error; else backupsFailed.push(PROVIDER_LABEL[name]);
+        }
+      }
+      if(!generated) {
+        if(backupsFailed.length) primaryError.tried=backupsFailed;
+        throw primaryError;
+      }
+      const switched=generated.provider!==which?`\n\n（${PROVIDER_LABEL[which]}没有响应，已自动改用${PROVIDER_LABEL[generated.provider]}出稿）`:'';
       // Deterministic safety nets: $ prefix on coins, and a format check the reviewer can see.
       const content=normalizeTickers(generated.content,collectTickers(snapshot,hotspots));
       const lint=lintDraft(content,plan,hotspots);
@@ -663,7 +685,7 @@ export class TradeDesk {
       if(!content.includes('送审备注：')) lint.push('稿件缺少送审备注');
       const draft={...generated,content,lint,order:plan.order,order_allowed:plan.allowed,status:'pending_text_review',created:Date.now(),day};
       await this.ctx.storage.put('draft:'+day,draft);
-      const warning=lint.length?`\n\n⚠ 格式自检：${lint.join('；')}。可点“退回重写”。`:'';
+      const warning=(lint.length?`\n\n⚠ 格式自检：${lint.join('；')}。可点“退回重写”。`:'')+switched;
       await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}${warning}\n\n——\n状态：等待文字审核｜模型：${draft.model}`,
         reply_markup:{inline_keyboard:[[
           {text:'✅ 文字通过',callback_data:`text_ok:${day}`},
@@ -673,7 +695,7 @@ export class TradeDesk {
       const failure=({anthropic:anthropicFailure,bedrock:bedrockFailure,gemini:geminiFailure}[which]||apiNebulaFailure)(error);
       await this.ctx.storage.put('draft:'+day,{status:'generation_failed',failed:Date.now(),provider:which,
         model:(which==='anthropic'?env.ANTHROPIC_MODEL:which==='bedrock'?(env.BEDROCK_MODEL||BEDROCK_MODEL):which==='gemini'?(env.GEMINI_MODEL||GEMINI_MODEL):env.APINEBULA_MODEL)||DEFAULT_MODEL,http_status:failure.status,failure:failure.label,prompt_chars:promptChars,detail:failure.detail||failure.reason});
-      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}可发送 /draft 再试。`});
+      await telegram(env,'sendMessage',{chat_id:chat,text:`送审稿生成失败，素材已保留。原因：${failure.reason}${failure.detail?'平台返回：'+failure.detail:''}（${failure.label}）。${failure.attempts>1?'已自动重试过一次；':''}${error?.tried?.length?`备用通道（${error.tried.join('、')}）也没成功；`:''}${fallbackChain(env,which).length?'':'没有配置备用模型通道；在后台“首选撰稿模型”旁填一个Claude官方或Bedrock的密钥后，这种情况会自动改走备用；'}可发送 /draft 再试。`});
     }
     return json({ok:true});
   }
