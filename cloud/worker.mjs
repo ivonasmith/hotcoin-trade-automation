@@ -286,10 +286,25 @@ async function compatDraft(which,env,hotspots,system,promptFn,opts={}) {
 }
 const apiNebulaDraft=(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={})=>compatDraft('apinebula',env,hotspots,system,promptFn,opts);
 const customDraft=(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPrompt,opts={})=>compatDraft('custom',env,hotspots,system,promptFn,opts);
+// GitHub's own cron is queued behind everyone else and has been starting 25-40 minutes late.
+// Cloudflare cron fires on the minute; a workflow_dispatch call starts the run at once.
+export async function dispatchCollect(env,fetcher=fetch,day=beijingDay()) {
+  if(!env.GITHUB_DISPATCH_TOKEN) return {sent:false,reason:'未填写 GITHUB_DISPATCH_TOKEN'};
+  const gate=eligible(day);
+  if(!gate.ok) return {sent:false,reason:gate.reason};
+  const res=await fetcher(`https://api.github.com/repos/${env.GITHUB_REPO||'ivonasmith/hotcoin-trade-automation'}/actions/workflows/collect.yml/dispatches`,{
+    method:'POST',headers:{Authorization:'Bearer '+env.GITHUB_DISPATCH_TOKEN,Accept:'application/vnd.github+json',
+      'X-GitHub-Api-Version':'2022-11-28','User-Agent':'uncleonchain-trade-bot','Content-Type':'application/json'},
+    body:JSON.stringify({ref:'main'})});
+  return {sent:res.ok,status:res.status};
+}
 export default {
   async fetch(request,env) {
     // One durable desk owns state; tokens and drafts have no public read route.
     return env.DESK.get(env.DESK.idFromName('uncleonchain')).fetch(request);
+  },
+  async scheduled(event,env,ctx) {
+    ctx.waitUntil(dispatchCollect(env).catch(()=>({sent:false})));
   }
 };
 
@@ -720,7 +735,7 @@ export class TradeDesk {
     }
     await this.ctx.storage.put('draft:'+day,{status:'generating',started:Date.now()});
     const snap=await this.ctx.storage.get('snapshot:'+day);
-    if(!snap) await telegram(env,'sendMessage',{chat_id:chat,text:'提醒：今天的行情快照还没有上传（取数任务通常北京时间18:30～19:30跑完）。没有它，送审稿里不会有订单，文字稿通过后也确定不了期号。建议等取数跑完再审；如果现在只是先看文字，可以继续。'});
+    if(!snap) await telegram(env,'sendMessage',{chat_id:chat,text:'提醒：今天的行情快照还没有上传（取数任务通常北京时间17:30～18:30跑完）。没有它，送审稿里不会有订单，文字稿通过后也确定不了期号。建议等取数跑完再审；如果现在只是先看文字，可以继续。'});
     // In the real Durable Object the writing runs inside an alarm (no Telegram webhook to outlive, up to minutes of wait);
     // without alarm support (tests) it runs inline.
     if(this.ctx.storage.setAlarm) {

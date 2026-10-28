@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {TradeDesk,customUrl} from '../cloud/worker.mjs';
+import worker,{TradeDesk,customUrl,dispatchCollect} from '../cloud/worker.mjs';
 import {beijingDay} from '../calendar.mjs';
 
 function setup(overrides={}) {
@@ -564,4 +564,21 @@ test('Bedrock返回403时给出权限说明且不泄露密钥',async()=>{
     assert.equal(text.includes('Bedrock'),true);
     assert.equal(text.includes('ABSKsecretsecretsecret'),false);
   } finally {restore();}
+});
+
+test('Cloudflare 定时器准点触发取数：没令牌不发、周末不发、工作日发到 collect.yml',async()=>{
+  const calls=[];
+  const fetcher=async(url,init)=>{calls.push({url,init});return {ok:true,status:204};};
+  assert.deepEqual(await dispatchCollect({},fetcher,'2026-10-21'),{sent:false,reason:'未填写 GITHUB_DISPATCH_TOKEN'});
+  const env={GITHUB_DISPATCH_TOKEN:'ghp_x'};
+  assert.equal((await dispatchCollect(env,fetcher,'2026-10-24')).sent,false);
+  assert.equal(calls.length,0);
+  assert.deepEqual(await dispatchCollect(env,fetcher,'2026-10-21'),{sent:true,status:204});
+  assert.match(calls[0].url,/ivonasmith\/hotcoin-trade-automation\/actions\/workflows\/collect\.yml\/dispatches$/);
+  assert.equal(calls[0].init.headers.Authorization,'Bearer ghp_x');
+  assert.equal(JSON.parse(calls[0].init.body).ref,'main');
+  // 入口 scheduled 不抛错（GitHub 报错也不影响）
+  let waited;
+  await worker.scheduled({},{},{waitUntil:p=>{waited=p;}});
+  assert.deepEqual(await waited,{sent:false,reason:'未填写 GITHUB_DISPATCH_TOKEN'});
 });
