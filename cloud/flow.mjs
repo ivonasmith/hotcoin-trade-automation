@@ -132,7 +132,11 @@ export class Flow {
     if(problems.length) throw Error('已通过的正文与程序订单不一致：'+problems.join('；'));
     const snapshot=await this.s.get('snapshot:'+day);
     const issue=issueNumber(snapshot?.ledger,day,(await this.s.get('issues'))||{});
-    if(!issue) throw Error('台账没有读取成功，无法确定今天是第几期');
+    if(!issue) throw Error(!snapshot
+      ?'今天的行情快照还没有上传到后台（取数任务通常北京时间18:30～19:30之间跑完，GitHub有时会晚），拿不到台账，所以确定不了期号。取数跑完后点“重试”即可，文字稿不用重审'
+      :snapshot.ledger?.ok===false
+        ?'台账读取失败（'+String(snapshot.ledger.error||'原因未知').slice(0,100)+'），无法确定今天是第几期。修好后点“重试”'
+        :'台账没有读取成功，无法确定今天是第几期。取数跑完后点“重试”');
     let english='',feedback='',model='';
     for(let attempt=1;attempt<=3;attempt++) {
       const result=await this.d.translate(this.env,body+(feedback?`\n\n（上一版的问题，请改正：${feedback}）`:''),TRANSLATE_SYSTEM,translatePrompt);

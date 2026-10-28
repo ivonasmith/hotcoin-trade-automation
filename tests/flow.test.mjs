@@ -153,6 +153,17 @@ test('英文稿数字对不上：重试后仍不一致就不出图，给重试�
   assert.equal(flow.status,'poster_pending');
   assert.equal(flow.rev,2);
 });
+test('今天的快照还没上传：说清楚是取数没跑完，不是台账坏了，并给重试按钮',async()=>{
+  const h=harness();
+  await seed(h);
+  await h.flow.s.delete('snapshot:'+DAY);
+  await h.flow.startFormal(DAY);
+  assert.equal((await h.flow.getFlow(DAY)).status,'formal_failed');
+  const failure=h.log.telegram.at(-1);
+  assert.match(failure.text,/行情快照还没有上传/);
+  assert.match(failure.text,/文字稿不用重审/);
+  assert.deepEqual(rows(failure),['formal_retry:'+DAY]);
+});
 test('已通过的正文与程序订单不一致时拦住',async()=>{
   const h=harness();
   await seed(h,{body:BODY.replace('2,637.28','2,637.82')});
