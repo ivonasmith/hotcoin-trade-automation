@@ -47,14 +47,14 @@ def money(value, plus=True):
     return f"{sign}${abs(value):,.2f}" if plus else f"${abs(value):,.2f}"
 
 
-def _row(sym, side, tier, status, size, entry, stop, target, price):
+def _row(sym, side, tier, status, size, entry, stop, target, price, moved=False):
     short = side == "做空"
     zh_size, en_size = size_label(size)
     tf_zh, tf_en = tier_label(tier)
     row = dict(sym=sym, side="空" if short else "多", tf_zh=tf_zh, tf_en=tf_en,
                state=status, state_en="Open" if status == "持仓中" else "Pending",
                size=zh_size, size_en=en_size, entry=fmt_price(entry), price=fmt_price(price) if price else "—",
-               stop=fmt_price(stop), stop_sub=signed_pct((stop / entry - 1) * 100), stop_moved=False,
+               stop=fmt_price(stop), stop_sub=signed_pct((stop / entry - 1) * 100), stop_moved=bool(moved),
                target=fmt_price(target), target_sub=signed_pct((target / entry - 1) * 100))
     sort_key = 0.0
     if status == "持仓中" and price:
@@ -92,8 +92,12 @@ def build(payload):
         status = item["status"]
         if status == "挂单中" and (str(item.get("issue")), item.get("symbol")) in fills:
             status = "持仓中"   # 台账程序已判定盘中触及进场，但写入要等终审之后
+        # 持仓中的单子，止损用台账日志里最新的「止损上移」价（stop_now）；登记的老止损一栏从不修改。挂单没成交，不存在上移。
+        moved_to = item.get("stop_now") if status == "持仓中" and item.get("status") == "持仓中" else None
+        moved = bool(moved_to) and moved_to != item["stop"]
         rows.append(_row(item["symbol"], item.get("side", "做空"), item.get("tier"), status,
-                         item.get("size") or 1.0, item["entry"], item["stop"], item["target"], prices.get(item["symbol"])))
+                         item.get("size") or 1.0, item["entry"], moved_to if moved else item["stop"], item["target"],
+                         prices.get(item["symbol"]), moved=moved))
     if order and (issue, order["symbol"]) not in seen:
         rows.append(_row(order["symbol"], "做空", "慢档日线", "挂单中", order["size"], order["entry"], order["stop"],
                          order["target"], prices.get(order["symbol"])))

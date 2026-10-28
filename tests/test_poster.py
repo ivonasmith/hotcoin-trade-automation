@@ -54,6 +54,21 @@ class BuildDataTest(unittest.TestCase):
         self.assertEqual(btc["size"], "0.12仓")
         self.assertEqual(len(closed), 6)
 
+    def test_held_position_shows_the_moved_stop_not_the_published_one(self):
+        p = payload()
+        p["ledger"]["active"][1]["stop_now"] = 150.0          # 2R reached: stop moved to entry
+        p["ledger"]["active"][0]["stop_now"] = 2500.0         # pending order: a moved stop makes no sense, ignored
+        _, rows, _ = bd.build(p)
+        sol, eth = rows[0], rows[1]
+        self.assertEqual((sol["sym"], sol["stop"], sol["stop_sub"], sol["stop_moved"]), ("SOL", "150", "+0.00%", True))
+        self.assertEqual((eth["sym"], eth["stop"], eth["stop_moved"]), ("ETH", "2,637.28", False))
+        p["ledger"]["active"][1]["stop_now"] = 145.0          # 3R: below entry, locked profit
+        _, rows, _ = bd.build(p)
+        self.assertEqual((rows[0]["stop"], rows[0]["stop_sub"]), ("145", "-3.33%"))
+        p["ledger"]["active"][1]["stop_now"] = None
+        _, rows, _ = bd.build(p)
+        self.assertEqual((rows[0]["stop"], rows[0]["stop_moved"]), ("155", False))
+
     def test_held_short_floating_pnl_uses_short_formula_and_colours(self):
         _, rows, _ = bd.build(payload())
         self.assertIn("+6.67%", rows[0]["pnl_zh"])
