@@ -582,3 +582,15 @@ test('Cloudflare 定时器准点触发取数：没令牌不发、周末不发、
   await worker.scheduled({},{},{waitUntil:p=>{waited=p;}});
   assert.deepEqual(await waited,{sent:false,reason:'未填写 GITHUB_DISPATCH_TOKEN'});
 });
+
+test('撰稿规则：废话句、战绩播报、结尾提问都会被检查出来；干净的稿子不报',async()=>{
+  const {lintDraft,DRAFT_SYSTEM}=await import('../cloud/draft-style.mjs');
+  const bad='审核正文：今天不开新单。原因很简单：我今天手里没有能支撑下单的交易依据，没有依据，我不挂单，也不动别的。\n\n本周已了结 9 笔，累计盈亏 +123.4美元。\n\n你的止损，是下单前定的吗？';
+  const warnings=lintDraft(bad).join('|');
+  assert.match(warnings,/和行情无关/);
+  assert.match(warnings,/战绩播报/);
+  assert.match(warnings,/结尾是向读者提问/);
+  const good='审核正文：今天不开新单。$BTC收在20日均线下方，上方82,314是老压力位。\n\n等今天日线收盘，复核做空条件。';
+  assert.deepEqual(lintDraft(good),[]);
+  assert.match(DRAFT_SYSTEM,/战绩[^。]*正文一个字都不写/);
+});

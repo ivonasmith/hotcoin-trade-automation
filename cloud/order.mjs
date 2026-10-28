@@ -246,7 +246,7 @@ export function orderBlock(plan) {
   }
   if(plan.reasons.length) lines.push(plan.allowed
     ?'其他币种的筛选情况（只供你写送审备注，正文一个字都不要提）：\n'+plan.reasons.map(item=>'- '+item).join('\n')
-    :'不出单的原因（正文用人话简述一两条，别列清单）：\n'+plan.reasons.map(item=>'- '+item).join('\n'));
+    :'不出单的原因（只供你写送审备注；正文不解释为什么不开，只写“今天不开新单”和行情本身）：\n'+plan.reasons.map(item=>'- '+item).join('\n'));
   const notes=[...plan.notes,...plan.human_checks];
   if(notes.length) lines.push('必须写进送审备注的事项：\n'+notes.map(item=>'- '+item).join('\n'));
   return lines.join('\n');

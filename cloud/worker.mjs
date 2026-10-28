@@ -1,6 +1,6 @@
 import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
-import {buildOrderPlan,orderBlock,recordBlock} from './order.mjs';
+import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {Flow,tgErrorReason} from './flow.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
@@ -759,7 +759,7 @@ export class TradeDesk {
       const hotspots=saved.parts.join('\n\n');
       const plan=buildOrderPlan(snapshot,day);
       which=draftProvider(env);
-      const input=hotspots+verified+'\n\n'+orderBlock(plan)+'\n\n'+recordBlock(snapshot?.ledger);
+      const input=hotspots+verified+'\n\n'+orderBlock(plan); // 战绩不再喂给撰稿（2026-10-28：老读者看图，正文不播报）
       const backups=fallbackChain(env,which);
       let generated,primaryError=null;
       const backupsFailed=[];
