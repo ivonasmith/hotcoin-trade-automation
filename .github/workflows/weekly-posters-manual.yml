@@ -31,13 +31,7 @@ jobs:
           DAY: ${{ inputs.day }}
         run: |
           python pipeline/weekly_collect.py --out out ${DAY:+--day "$DAY"}
-          python - <<'PY'
-          import json, sys
-          sys.path.insert(0, "poster")
-          import weekend_gen
-          pack = json.load(open("out/pack.json", encoding="utf-8"))
-          print(weekend_gen.render(pack, "out"))
-          PY
+          python pipeline/weekly_render_manual.py out
           ls -la out
       - name: 把成品推到临时分支（取回后删除）
         run: |
