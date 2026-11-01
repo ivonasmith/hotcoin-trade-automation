@@ -38,6 +38,30 @@ class WeeklyCloseAmounts(unittest.TestCase):
         self.assertEqual(wp._close_usd("+10.3 美元", True), "+10.3 美元")
 
 
+class WeeklyMovedStop(unittest.TestCase):
+    def build(self, stop_now):
+        c, L, notes = load()
+        led = json.loads(json.dumps(L["ledger"]))
+        for r in led["active"]:
+            if r["symbol"] == "SOL":
+                r["stop_now"] = stop_now
+        return wp.build_pack("2026-10-25", c, led, L["log"], notes, L["prices"], L["px_date"])
+
+    def test_locked_moved_stop_is_written_instead_of_the_old_rule_text(self):
+        p = self.build(104.2)
+        zh = "\n".join(wp.recap_lines(p, "zh"))
+        en = "\n".join(wp.recap_lines(p, "en"))
+        self.assertIn("止损已按规则上移到 104.2，已越过进场价，最差也是盈利", zh)
+        self.assertIn("stop already moved to 104.2 by rule, past entry", en)
+        sol = [ln for ln in zh.split("\n") if "SOL 空单" in ln][0]
+        self.assertNotIn("最差保本", sol)
+        self.assertIsNone(re.search(r"[　-〿一-鿿＀-￯]", en))
+
+    def test_without_a_moved_stop_the_rule_text_stays(self):
+        zh = "\n".join(wp.recap_lines(self.build(None), "zh"))
+        self.assertIn("按规则止损上移到进场价，最差保本", zh)
+
+
 class WeeklyPack(unittest.TestCase):
     def test_window(self):
         self.assertEqual(wp.week_window("2026-10-25"), ("2026-10-26", "2026-11-01"))

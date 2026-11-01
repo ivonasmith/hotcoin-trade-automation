@@ -172,6 +172,7 @@ def _position(rec, note, prices):
     px = (prices.get(sym) or {}).get("close")
     entry, stop, target = _num(rec.get("entry")), _num(rec.get("stop")), _num(rec.get("target"))
     out = {"sym": sym, "side": "short" if short else "long", "issue": rec.get("issue"), "entry": entry, "px": px,
+           "stop_now": _num(rec.get("stop_now")),
            "notional": _notional(rec, note), "r": None, "pnl_usd": None, "to_target_pct": None}
     if px is None or entry is None:
         return out
@@ -460,7 +461,12 @@ def recap_lines(pack, lang):
             bits.append(_usd(p["pnl_usd"]))
         head = f"{_tick(p['sym'], z)} {_side(p['side'], z)}（{px_d} 收盘价 {p['px']:g}）：" if z else f"{_tick(p['sym'], z)} {_side(p['side'], z)} (close {px_d}: {p['px']:g}): "
         tail = ""
-        if p["r"] is not None and p["r"] >= 2:
+        sn, ent = p.get("stop_now"), p.get("entry")
+        locked = sn is not None and ent is not None and ((p["side"] == "short" and sn < ent) or (p["side"] == "long" and sn > ent))
+        if locked:   # 台账日志里已经记了「止损上移」，写现在的止损，不再写“上移到进场价”
+            tail = (f"；止损已按规则上移到 {sn:g}，已越过进场价，最差也是盈利" if z
+                    else f"; stop already moved to {sn:g} by rule, past entry, so the worst case is still a profit")
+        elif p["r"] is not None and p["r"] >= 2:
             tail = "；已过 2R，按规则止损上移到进场价，最差保本" if z else "; past 2R, so by rule the stop moves to entry (worst case breakeven)"
         if p["to_target_pct"] is not None and 0 <= p["to_target_pct"] <= 2:
             tail += (f"；离目标价还差 {p['to_target_pct']:.1f}%，不提前平仓" if z else f"; {p['to_target_pct']:.1f}% from target, no early exit")
