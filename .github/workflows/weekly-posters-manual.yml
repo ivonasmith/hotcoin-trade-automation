@@ -1,0 +1,49 @@
+name: 热币交易 · 手动出周日海报（备用）
+on:
+  workflow_dispatch:
+    inputs:
+      day:
+        description: 日期（选填，默认今天，北京时间）
+        required: false
+        default: ''
+permissions:
+  contents: write
+concurrency:
+  group: hotcoin-weekly-manual
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          python -m pip install -r pipeline/requirements.txt -r poster/requirements.txt
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk fonts-liberation || true
+      - name: 取数并出图
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          DAY: ${{ inputs.day }}
+        run: |
+          python pipeline/weekly_collect.py --out out ${DAY:+--day "$DAY"}
+          python - <<'PY'
+          import json, sys
+          sys.path.insert(0, "poster")
+          import weekend_gen
+          pack = json.load(open("out/pack.json", encoding="utf-8"))
+          print(weekend_gen.render(pack, "out"))
+          PY
+          ls -la out
+      - name: 把成品推到临时分支（取回后删除）
+        run: |
+          git config user.name "weekly-poster-bot"; git config user.email "bot@users.noreply.github.com"
+          git checkout --orphan tmp-posters
+          git rm -rf -q . 
+          mkdir -p posters && cp out/* posters/
+          git add posters && git commit -q -m "weekly posters ${{ github.run_id }}"
+          git push -f origin tmp-posters
