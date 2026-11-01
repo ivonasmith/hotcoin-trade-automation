@@ -24,6 +24,20 @@ def pack(cal=None):
     return wp.build_pack("2026-10-25", cal or c, L["ledger"], L["log"], notes, L["prices"], L["px_date"])
 
 
+class WeeklyCloseAmounts(unittest.TestCase):
+    def test_chinese_usd_unit_never_reaches_english_poster(self):
+        c, L, notes = load()
+        log = list(L["log"]) + [{"日期": "2026-10-22", "期号": "37", "标的": "XRP", "变更": "止损了结",
+                                 "价格": "1.3308", "币价盈亏": "+3.03%", "账户盈亏": "+10.3 美元", "依据": "x"}]
+        p = wp.build_pack("2026-10-25", c, L["ledger"], log, notes, L["prices"], L["px_date"])
+        self.assertTrue(any(x["sym"] == "XRP" for x in p["recap"]["closes"]) if "recap" in p else True)
+        html_en = wg.build(p, "en")
+        body = re.sub(r"<[^>]+>", " ", re.sub(r"<style.*?</style>", "", html_en, flags=re.S))
+        self.assertIsNone(re.search(r"[　-〿一-鿿＀-￯]", body))
+        self.assertIn("+$10.3", body)
+        self.assertEqual(wp._close_usd("+10.3 美元", True), "+10.3 美元")
+
+
 class WeeklyPack(unittest.TestCase):
     def test_window(self):
         self.assertEqual(wp.week_window("2026-10-25"), ("2026-10-26", "2026-11-01"))

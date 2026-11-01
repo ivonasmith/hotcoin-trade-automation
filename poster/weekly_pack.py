@@ -276,6 +276,19 @@ def _usd(x, plus=True):
     return f"{'+' if x >= 0 and plus else '-' if x < 0 else ''}${abs(x):,.2f}"
 
 
+def _close_usd(text, z):
+    """台账里写的是「+10.3 美元」。中文照写；英文改成「+$10.3」，不能把中文带进英文海报。"""
+    text = str(text or "").strip()
+    if z:
+        return text
+    m = re.search(r"([+-]?)\s*\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", text)
+    if not m:
+        return re.sub(r"美元|USD|usd", "", text).strip() or "—"
+    value = float(m.group(2).replace(",", ""))
+    sign = "-" if m.group(1) == "-" else "+"
+    return f"{sign}${value:,.1f}" if value != int(value) or value < 1000 else f"{sign}${value:,.0f}"
+
+
 def _pct(x):
     return f"{x:+.2f}%"
 
@@ -458,7 +471,8 @@ def recap_lines(pack, lang):
         lines.append(f"已了结 {acc['closed_n']} 笔，累计 {_usd(acc['cum_usd'])}，账户收益 {_pct(acc['ret_pct'])}" if z
                      else f"{acc['closed_n']} closed trades, cumulative {_usd(acc['cum_usd'])}, account return {_pct(acc['ret_pct'])}")
     if R["closes"]:
-        parts = [f"{_tick(c['sym'], z)} {c['pct']}（{c['usd']}）" for c in R["closes"]]
+        op, cl = ("（", "）") if z else (" (", ")")
+        parts = [f"{_tick(c['sym'], z)} {c['pct']}{op}{_close_usd(c['usd'], z)}{cl}" for c in R["closes"]]
         lines.append(("本周平仓：" + "、".join(parts)) if z else ("Closed this week: " + ", ".join(parts)))
     else:
         lines.append("本周没有新平仓的单" if z else "Nothing closed this week")
