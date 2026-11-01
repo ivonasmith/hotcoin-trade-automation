@@ -1,0 +1,9 @@
+【$BTC Week Ahead】
+
+The one external event to watch next week: US nonfarm payrolls, Fri Nov 6, 21:30 Beijing time. In the 2 hours after the release, BTC's high-low range is typically 2.0% (normal: 1.3%); 1 in 4 times above 2.5%, 1 in 10 above 3.0%, largest since 2022 4.7%. No resting orders near price for 2 hours around the release (13:30 UTC); the day as a whole is not more volatile. To read direction, wait for the daily close at Nov 7 08:00 Beijing time, not a single wick.
+
+Last week's scorecard: Still waiting for price: BTC. SOL short (close Oct 31: 95.44): +4.5R, +$24.28; stop already moved to 104.2 by rule, past entry, so the worst case is still a profit. 18 closed trades, cumulative +$694.02, account return +6.94%. Closed this week: XRP +3.03% (+$10.3).
+
+We judge stops on the daily close; an intraday wick doesn't count. If your exchange stop triggers intraday, your result will differ from ours, so leave yourself more room.
+
+Industry events: Devcon (Ethereum, Mumbai), SiGMA World (Roma). Projects like to time news around conferences, but a conference is not a trade signal.
