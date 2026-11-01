@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: write
 concurrency:
   group: hotcoin-weekly
   cancel-in-progress: false
@@ -27,3 +28,10 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
         run: python pipeline/weekly_collect.py
+      # GitHub 对每5分钟的定时轮询限流很厉害（2026-11-01 周日 08:08 送审后整整 5 个半小时一次都没轮到，海报没出）。
+      # 送审成功后立刻手动启动一次海报任务，不再等轮询。
+      - name: 立即启动海报任务
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run jobs.yml --ref main
