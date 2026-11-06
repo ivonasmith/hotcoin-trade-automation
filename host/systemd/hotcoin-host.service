@@ -1,0 +1,22 @@
+[Unit]
+Description=Hotcoin trade host (scheduler, jobs, monitor, heartbeat)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hotcoin
+WorkingDirectory=/opt/hotcoin/repo
+Environment=HOTCOIN_ENV_FILE=/etc/hotcoin/host.env
+Environment=HOTCOIN_STATE_FILE=/var/lib/hotcoin/state.json
+Environment=HOTCOIN_RUN_DIR=/var/lib/hotcoin/run
+ExecStart=/opt/hotcoin/venv/bin/python /opt/hotcoin/repo/host/hotcoin_host.py
+Restart=always
+RestartSec=10
+# 只给它需要的目录写权限
+ProtectSystem=full
+ReadWritePaths=/var/lib/hotcoin /opt/hotcoin/repo /home/hotcoin
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

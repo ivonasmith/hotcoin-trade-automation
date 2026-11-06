@@ -172,3 +172,15 @@ Telegram 的「照片」会被压到最长边约 1280 像素，竖版长海报�
 - 现在：`collect.yml` 的备用定时提前到 UTC 09:07（北京 17:07，避开整点和半点），按现有延迟大约 18:00～18:15 取完；Worker 新增 Cloudflare 定时器 UTC 09:00（北京 17:00）准点调用 GitHub 触发 `collect.yml`，需要在后台填 `GITHUB_DISPATCH_TOKEN`（细粒度令牌，只选这个仓库，权限 Actions: Read and write）。没填令牌时这个定时器什么都不做，靠 GitHub 备用定时。
 - 同一个令牌也让海报任务立即启动（`flow.dispatch`），不用等轮询。两个任务可能各跑一次，快照上传是覆盖写，重复无害。
 - 快照 3 小时内上传才被接受、超过 4 小时订单备注会提示价格不新；17:00 取数 → 20:00/21:00 发布仍在范围内。
+
+## 香港服务器主机（2026-11-06）
+
+程序在 `host/`：`hotcoin_host.py`（常驻：工作日 17:00 取数、周日 15:00 取下周清单、30 秒轮询海报/台账任务、15 分钟监控、60 秒心跳）、
+`monitor.py`（监控规则判断）、`check_network.py`（网络自检）、`install.sh`（一键安装 + systemd 开机自启）。
+GitHub Actions 里的定时任务保留作备用（后台对重复上传幂等）。
+
+- 机房必须在香港（或新加坡/东京，先自检）；美国 IP 币安合约接口返回 451。币安域名只用 fapi.binance.com，备用 www.binance.com。
+- 安装：`curl -fsSL https://raw.githubusercontent.com/ivonasmith/hotcoin-trade-automation/main/host/install.sh | sudo bash`，按提示粘贴 WORKER_INGEST_URL、PIPELINE_SECRET、NOTION_TOKEN；密钥只存 `/etc/hotcoin/host.env`。
+- 自检：`python3 host/check_network.py`；手动跑：`hotcoin_host.py --once`（监控一轮）、`--run collect|weekly`。
+- Telegram 命令：`/watch 币 条件 数字 [常驻]`（上破 / 跌破 / 日收上 / 日收下 / 4h收上 / 4h收下 / 急涨 / 急跌）、`/watchlist`、`/unwatch 序号|币|all`、`/host`（心跳状态）。超过 15 分钟没心跳，后台发一次 Telegram 告警，恢复时再通知。
+- 监控只报数据，不给买卖建议；最多 30 条规则，一次性规则触发后自动取消，常驻规则 6 小时内不重复。

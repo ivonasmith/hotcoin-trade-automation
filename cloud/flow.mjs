@@ -414,6 +414,8 @@ export class Flow {
     }
     const job=await this.s.get('draft-job');
     if(job && (next===null || job.at<next)) next=job.at;
+    const hostCheck=await this.s.get('host-check'); // 主机心跳检查，见 worker.mjs hostCheck
+    if(hostCheck && (next===null || hostCheck<next)) next=hostCheck;
     if(next!==null && this.s.setAlarm) await this.s.setAlarm(Math.max(next,this.now()+1000));
     else if(next===null && this.s.deleteAlarm) await this.s.deleteAlarm();
   }

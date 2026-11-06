@@ -3,6 +3,7 @@ import {compactSnapshot} from './snapshot.mjs';
 import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {Flow,tgErrorReason} from './flow.mjs';
+import {parseWatch,addRule,removeRules,applyFired,describeRule,USAGE as WATCH_USAGE} from './watch.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
 
 const SCOPES='tweet.read tweet.write users.read media.write offline.access';
@@ -133,6 +134,7 @@ function apiNebulaFailure(error) {
     .replace(/sk-[A-Za-z0-9_-]{8,}/g,'[密钥已隐藏]').slice(0,300);
   return {status,label,reason,detail,attempts:Number(error?.attempts)||1};
 }
+const HOST_STALE_MS=15*60*1000,HOST_CHECK_MS=10*60*1000;
 async function telegram(env,method,payload) {
   if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,{
@@ -330,7 +332,90 @@ export class TradeDesk {
       await this.ctx.storage.delete('draft-job'); // taken: a retried alarm must not write the draft twice
       try { await this.runDraft(job.chat,env,job.day); } catch { /* runDraft reports its own failures */ }
     }
+    await this.hostCheck(env);
     await this.flow(env).alarm();
+  }
+  async pipelineAuthorized(request,env) {
+    const auth=request.headers.get('Authorization')||'';
+    return Boolean(env.PIPELINE_SECRET) && auth.startsWith('Bearer ') && await matches(auth.slice(7),env.PIPELINE_SECRET);
+  }
+  // 服务器每分钟报一次心跳；后台每 10 分钟看一眼，超过 15 分钟没有心跳就提醒一次（恢复后再提醒一次）。
+  async hostCheck(env) {
+    const store=this.ctx.storage,at=await store.get('host-check');
+    if(!at || Date.now()<at) return;
+    await store.delete('host-check');
+    const beat=await store.get('host-heartbeat'),age=beat?Date.now()-beat.at:Infinity;
+    if(age>HOST_STALE_MS) {
+      if(await store.get('host-down-notified')) return;
+      await store.put('host-down-notified',Date.now());
+      if(env.TELEGRAM_OWNER_ID) {
+        const minutes=Number.isFinite(age)?`已有 ${Math.round(age/60000)} 分钟`:'一直';
+        try { await telegram(env,'sendMessage',{chat_id:Number(env.TELEGRAM_OWNER_ID),
+          text:`主机${minutes}没有心跳。定时取数和海报任务会改走 GitHub 备用（会晚一些），15 分钟监控暂停。请看一下服务器是否在线。`}); } catch { /* best effort */ }
+      }
+      return; // 不再自己续闹钟，等心跳回来再接上
+    }
+    await store.put('host-check',Date.now()+HOST_CHECK_MS);
+  }
+  async hostRoutes(request,url,path,env) {
+    if(!await this.pipelineAuthorized(request,env)) return json({ok:false},403);
+    const store=this.ctx.storage;
+    if(path==='/pipeline/watchlist' && request.method==='GET')
+      return json({ok:true,rules:(await store.get('watchlist'))||[]});
+    if(request.method!=='POST') return json({ok:false},404);
+    if(Number(request.headers.get('Content-Length')||0)>100000) return json({ok:false},413);
+    const body=await request.json();
+    if(path==='/pipeline/notify') {
+      const text=String(body.text||'').slice(0,3500);
+      if(!text) return json({ok:false,error:'没有内容'},400);
+      if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
+      await telegram(env,'sendMessage',{chat_id:Number(env.TELEGRAM_OWNER_ID),text});
+      if(Array.isArray(body.fired) && body.fired.length)
+        await store.put('watchlist',applyFired((await store.get('watchlist'))||[],body.fired,Date.now()));
+      return json({ok:true});
+    }
+    if(path==='/pipeline/heartbeat') {
+      const tasks=body.tasks&&typeof body.tasks==='object'?body.tasks:{};
+      await store.put('host-heartbeat',{at:Date.now(),host:String(body.host||'').slice(0,40),version:String(body.version||'').slice(0,20),tasks});
+      if(await store.get('host-down-notified')) {
+        await store.delete('host-down-notified');
+        if(env.TELEGRAM_OWNER_ID) { try { await telegram(env,'sendMessage',{chat_id:Number(env.TELEGRAM_OWNER_ID),text:'主机心跳恢复了。'}); } catch { /* best effort */ } }
+      }
+      if(!(await store.get('host-check'))) { await store.put('host-check',Date.now()+HOST_CHECK_MS); await this.flow(env).arm(); }
+      return json({ok:true});
+    }
+    return json({ok:false},404);
+  }
+  async watchCommand(text,env,reply) {
+    const store=this.ctx.storage,list=(await store.get('watchlist'))||[];
+    if(text==='/watchlist') {
+      await reply(list.length?'监控清单（每 15 分钟检查一次）：\n'+list.map(describeRule).join('\n'):'监控清单是空的。\n'+WATCH_USAGE);
+      return;
+    }
+    if(text==='/unwatch' || text.startsWith('/unwatch ')) {
+      const target=text.split(/\s+/).slice(1).join(' ');
+      if(!target) { await reply('用法：/unwatch 序号 或 /unwatch 币 或 /unwatch all'); return; }
+      const result=removeRules(list,target);
+      if(!result.removed.length) { await reply('没找到这条。发 /watchlist 看现有的。'); return; }
+      await store.put('watchlist',result.list);
+      await reply('已取消：\n'+result.removed.map(describeRule).join('\n'));
+      return;
+    }
+    const parsed=parseWatch(text);
+    if(!parsed.ok) { await reply(parsed.error); return; }
+    const seq=((await store.get('watch-seq'))||0)+1;
+    const added=addRule(list,parsed.rule,seq,Date.now());
+    if(!added.ok) { await reply(added.error); return; }
+    await store.put('watch-seq',seq);
+    await store.put('watchlist',added.list);
+    await reply('已加入监控：'+describeRule(added.rule)+'\n服务器每 15 分钟检查一次，触发后在这里提醒你。');
+  }
+  async hostStatus(env,reply) {
+    const beat=await this.ctx.storage.get('host-heartbeat');
+    if(!beat) { await reply('主机还没有连接过。服务器装好并启动后会每分钟报一次心跳。'); return; }
+    const seconds=Math.round((Date.now()-beat.at)/1000);
+    const tasks=Object.entries(beat.tasks||{}).map(([name,value])=>`${name}：${value}`).join('\n');
+    await reply(`主机 ${beat.host||''}：${seconds>HOST_STALE_MS/1000?'已失联，':'在线，'}${seconds} 秒前有心跳${tasks?'\n'+tasks:''}`);
   }
   async jobs(request,url,path,env) {
     const flow=this.flow(env);
@@ -410,6 +495,8 @@ export class TradeDesk {
       const result=await this.flow(env).startWeekly(day,{pack});
       return json({ok:result.status===200,...result,status:undefined},result.status);
     }
+    if(path==='/pipeline/watchlist' || path==='/pipeline/notify' || path==='/pipeline/heartbeat')
+      return this.hostRoutes(request,url,path,env);
     if(path.startsWith('/pipeline/jobs/')) {
       const auth=request.headers.get('Authorization')||'';
       if(!env.PIPELINE_SECRET || !auth.startsWith('Bearer ') || !await matches(auth.slice(7),env.PIPELINE_SECRET))
@@ -681,6 +768,14 @@ export class TradeDesk {
     }
     if(text==='/postnow') {
       await this.flow(env).postNow(beijingDay());
+      return json({ok:true});
+    }
+    if(text==='/watchlist' || text==='/unwatch' || text.startsWith('/unwatch ') || text==='/watch' || text.startsWith('/watch ')) {
+      if(text==='/watch') await reply(WATCH_USAGE); else await this.watchCommand(text,env,reply);
+      return json({ok:true});
+    }
+    if(text==='/host') {
+      await this.hostStatus(env,reply);
       return json({ok:true});
     }
     if(text==='/draft') return this.makeDraft(chat,env);
