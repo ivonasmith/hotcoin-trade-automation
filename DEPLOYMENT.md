@@ -103,7 +103,7 @@ Telegram文字热点流程：`/hotspots` → 粘贴一段或多段文字 → `/d
 
 每周日一期，不是工作日的「第N期」，没有订单，不写台账、不占期号。流程：
 
-1. `weekly.yml`（周日北京时间 15:17）跑 `pipeline/weekly_collect.py`：读事件日历 `uncleonchain.com/data/cal/cal_latest.json`（备用：GitHub 原始文件）、Notion 台账、持仓币最新已收盘日线（和工作日同一个行情脚本）。**不调用模型**：`poster/weekly_pack.py` 按数据拼出数据包和中英文帖子，海报 `poster/weekend_gen.py` 读同一个数据包，数字只有一个来源。
+1. 服务器主机（周日北京时间 18:00；`weekly.yml` 19:17 为备用）跑 `pipeline/weekly_collect.py`：读事件日历 `uncleonchain.com/data/cal/cal_latest.json`（备用：GitHub 原始文件）、Notion 台账、持仓币最新已收盘日线（和工作日同一个行情脚本）。**不调用模型**：`poster/weekly_pack.py` 按数据拼出数据包和中英文帖子，海报 `poster/weekend_gen.py` 读同一个数据包，数字只有一个来源。
 2. 上传到 Worker `/pipeline/weekly`（同一个 `PIPELINE_SECRET`；日期必须是今天，英文稿不许含中文，标题固定【$BTC下周清单】/【$BTC Week Ahead】）。取不到日历、台账或收盘价时不出稿，脚本会通过同一个入口让 Telegram 告诉你原因。
 3. Worker 排海报任务（`jobs.yml` 周日 15:00–22:59 每 5 分钟轮询），出中、英各 1 张图，发到 Telegram，连同中英文正式稿和「程序提示」（例如日历里没有解锁数据）一起请你终审。没有文字稿审核这一步——文字是程序按数据拼的，你在终审时一并核对。
 4. 终审通过 → 中文、英文都排在周日北京时间 20:00，到点自动发布（`PUBLISH_ENABLED` 不是 true 时只演练）；错过 60 分钟不擅自补发，问你。退回后，到 Actions 手动运行「周日下周清单」重新出一份。
@@ -175,7 +175,7 @@ Telegram 的「照片」会被压到最长边约 1280 像素，竖版长海报�
 
 ## 香港服务器主机（2026-11-06）
 
-程序在 `host/`：`hotcoin_host.py`（常驻：工作日 17:00 取数、周日 15:00 取下周清单、30 秒轮询海报/台账任务、15 分钟监控、60 秒心跳）、
+程序在 `host/`：`hotcoin_host.py`（常驻：工作日 18:00 取数、周日 18:00 取下周清单、30 秒轮询海报/台账任务、15 分钟监控、60 秒心跳）、
 `monitor.py`（监控规则判断）、`check_network.py`（网络自检）、`install.sh`（一键安装 + systemd 开机自启）。
 GitHub Actions 里的定时任务保留作备用（后台对重复上传幂等）。
 
@@ -185,3 +185,8 @@ GitHub Actions 里的定时任务保留作备用（后台对重复上传幂等�
 - Telegram 命令：`/watch 币 条件 数字 [常驻]`（上破 / 跌破 / 日收上 / 日收下 / 4h收上 / 4h收下 / 急涨 / 急跌）、`/watchlist`、`/unwatch 序号|币|all`、`/host`（心跳状态）。超过 15 分钟没心跳，后台发一次 Telegram 告警，恢复时再通知。
 - 监控只报数据，不给买卖建议；最多 30 条规则，一次性规则触发后自动取消，常驻规则 6 小时内不重复。
 - 自动更新：主机每 10 分钟拉一次仓库。取数/出图/监控脚本的改动下次任务前自动生效；`host/` 或依赖文件变了，主机在没有任务运行时自己退出，systemd 十秒内拉起新版。所以以后改代码推到 main 就行，不用登录服务器。
+
+## 取数时间调整（2026-11-06）
+
+取数改由自己的服务器跑，不再排队，所以从 17:00 / 周日 15:00 推迟到北京时间 18:00（约 18:15 取完，行情更新鲜，留 1 小时 45 分钟审稿，20:00 发布不变）。
+GitHub 里的 `collect.yml` / `weekly.yml` 定时改成 19:07 / 周日 19:17，只作备用（实际会再晚半小时）。Cloudflare Worker 的 17:00 定时触发已取消（`wrangler.jsonc` 的 crons 清空），避免和主机重复取数。

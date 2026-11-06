@@ -830,7 +830,7 @@ export class TradeDesk {
     }
     await this.ctx.storage.put('draft:'+day,{status:'generating',started:Date.now()});
     const snap=await this.ctx.storage.get('snapshot:'+day);
-    if(!snap) await telegram(env,'sendMessage',{chat_id:chat,text:'提醒：今天的行情快照还没有上传（取数任务通常北京时间17:30～18:30跑完）。没有它，送审稿里不会有订单，文字稿通过后也确定不了期号。建议等取数跑完再审；如果现在只是先看文字，可以继续。'});
+    if(!snap) await telegram(env,'sendMessage',{chat_id:chat,text:'提醒：今天的行情快照还没有上传（取数任务北京时间18:00开始、约18:15跑完）。没有它，送审稿里不会有订单，文字稿通过后也确定不了期号。建议等取数跑完再审；如果现在只是先看文字，可以继续。'});
     // In the real Durable Object the writing runs inside an alarm (no Telegram webhook to outlive, up to minutes of wait);
     // without alarm support (tests) it runs inline.
     if(this.ctx.storage.setAlarm) {

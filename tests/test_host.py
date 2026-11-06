@@ -25,27 +25,27 @@ def ms(dt):
 class ScheduleTest(unittest.TestCase):
     def test_collect_window_and_weekdays(self):
         state = {}
-        self.assertFalse(host.due("collect", bj(2026, 11, 6, 16, 59), state))  # 周五 17:00 前
-        self.assertTrue(host.due("collect", bj(2026, 11, 6, 17, 0), state))
+        self.assertFalse(host.due("collect", bj(2026, 11, 6, 17, 59), state))  # 周五 18:00 前
+        self.assertTrue(host.due("collect", bj(2026, 11, 6, 18, 0), state))
         self.assertTrue(host.due("collect", bj(2026, 11, 6, 19, 30), state))  # 补跑窗口内
         self.assertFalse(host.due("collect", bj(2026, 11, 6, 19, 31), state))
-        self.assertFalse(host.due("collect", bj(2026, 11, 7, 17, 5), state))  # 周六不跑
-        self.assertFalse(host.due("weekly", bj(2026, 11, 6, 15, 5), state))  # 周五不跑周日任务
+        self.assertFalse(host.due("collect", bj(2026, 11, 7, 18, 5), state))  # 周六不跑
+        self.assertFalse(host.due("weekly", bj(2026, 11, 6, 18, 5), state))  # 周五不跑周日任务
 
     def test_weekly_sunday(self):
-        self.assertFalse(host.due("weekly", bj(2026, 11, 8, 14, 59), {}))
-        self.assertTrue(host.due("weekly", bj(2026, 11, 8, 15, 0), {}))
+        self.assertFalse(host.due("weekly", bj(2026, 11, 8, 17, 59), {}))
+        self.assertTrue(host.due("weekly", bj(2026, 11, 8, 18, 0), {}))
         self.assertFalse(host.due("weekly", bj(2026, 11, 8, 19, 1), {}))
 
     def test_done_and_retry_gap(self):
         state = {}
-        now = bj(2026, 11, 6, 17, 0)
+        now = bj(2026, 11, 6, 18, 0)
         host.mark("collect", now, False, state)
         self.assertFalse(host.due("collect", now + timedelta(minutes=5), state))  # 失败后 10 分钟内不重试
         self.assertTrue(host.due("collect", now + timedelta(minutes=10), state))
         host.mark("collect", now + timedelta(minutes=10), True, state)
         self.assertFalse(host.due("collect", now + timedelta(minutes=40), state))  # 当天已完成
-        self.assertTrue(host.due("collect", bj(2026, 11, 9, 17, 1), state))  # 下个工作日又该跑
+        self.assertTrue(host.due("collect", bj(2026, 11, 9, 18, 1), state))  # 下个工作日又该跑
 
     def test_tick_runs_once_and_records_failure(self):
         calls = []
@@ -53,16 +53,16 @@ class ScheduleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "state.json"
             tasks = {"collect": lambda env: calls.append("collect"), "weekly": lambda env: calls.append("weekly")}
-            ran = host.scheduler_tick({}, state, tasks, bj(2026, 11, 6, 17, 1), state_path=path)
+            ran = host.scheduler_tick({}, state, tasks, bj(2026, 11, 6, 18, 1), state_path=path)
             self.assertEqual(ran, ["collect"])
-            self.assertEqual(host.scheduler_tick({}, state, tasks, bj(2026, 11, 6, 17, 2), state_path=path), [])
+            self.assertEqual(host.scheduler_tick({}, state, tasks, bj(2026, 11, 6, 18, 2), state_path=path), [])
             self.assertEqual(json.loads(path.read_text())["collect"]["done"], "2026-11-06")
 
             def boom(env):
                 raise RuntimeError("币安拒绝")
             failing = {"collect": boom, "weekly": boom}
             state2 = {}
-            host.scheduler_tick({}, state2, failing, bj(2026, 11, 9, 17, 0), state_path=path)
+            host.scheduler_tick({}, state2, failing, bj(2026, 11, 9, 18, 0), state_path=path)
             self.assertIn("币安拒绝", state2["collect"]["error"])
             self.assertNotEqual(state2["collect"].get("done"), "2026-11-09")
 
