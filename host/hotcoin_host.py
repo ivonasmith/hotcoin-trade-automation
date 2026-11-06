@@ -195,6 +195,22 @@ def task_weekly(env):
 TASKS = {"collect": task_collect, "weekly": task_weekly}
 
 
+def self_update(env):
+    """拉最新代码；host/ 或依赖文件有变化时返回 True（调用方负责重启）。依赖文件变了会先装依赖。"""
+    _, before = run_step(["git", "rev-parse", "HEAD"], env, ROOT, timeout=30)
+    run_step(["git", "pull", "--ff-only", "-q"], env, ROOT, timeout=120)
+    _, after = run_step(["git", "rev-parse", "HEAD"], env, ROOT, timeout=30)
+    before, after = before.strip(), after.strip()
+    if before == after:
+        return False
+    _, names = run_step(["git", "diff", "--name-only", before, after], env, ROOT, timeout=30)
+    files = [line.strip() for line in names.splitlines() if line.strip()]
+    if any(f.endswith("requirements.txt") for f in files):
+        run_step([sys.executable, "-m", "pip", "install", "-q", "-r", "pipeline/requirements.txt", "-r", "poster/requirements.txt"],
+                 env, ROOT, timeout=900)
+    return any(f.startswith("host/") or f.endswith("requirements.txt") for f in files)
+
+
 def scheduler_tick(env, state, tasks, now=None, runner=None, state_path=None):
     """检查一遍定时任务，到点的跑一遍。返回跑了的任务名。"""
     now = now or datetime.now(BJ)
@@ -227,6 +243,7 @@ class Host:
         self.monitor_state = {}
         self.status = {"started": datetime.now(BJ).isoformat(), "monitor": None, "jobs": None, "scheduler": None}
         self.stop = threading.Event()
+        self.work = threading.Lock()  # 有任务在跑时不更新、不重启
 
     def loop(self, name, interval, fn):
         while not self.stop.is_set():
@@ -239,7 +256,8 @@ class Host:
             self.stop.wait(max(1, interval - (time.time() - began)))
 
     def scheduler(self):
-        ran = scheduler_tick(self.env, self.state, TASKS)
+        with self.work:
+            ran = scheduler_tick(self.env, self.state, TASKS)
         failed = [n for n in SCHEDULE if (self.state.get(n) or {}).get("error")]
         self.status["scheduler"] = ("失败：" + "、".join(failed)) if failed else ("ok" + (f"（刚跑 {','.join(ran)}）" if ran else ""))
 
@@ -253,12 +271,24 @@ class Host:
         if not peek.get("job"):
             self.status["jobs"] = "ok"
             return
-        update_repo(self.env)
-        os.environ.update({k: v for k, v in self.env.items() if k in ("NOTION_TOKEN", "NOTION_API_KEY")})
-        for _ in range(5):
-            if not job_runner.run_one(base, secret, token):
-                break
+        with self.work:
+            update_repo(self.env)
+            os.environ.update({k: v for k, v in self.env.items() if k in ("NOTION_TOKEN", "NOTION_API_KEY")})
+            for _ in range(5):
+                if not job_runner.run_one(base, secret, token):
+                    break
         self.status["jobs"] = "ok（刚处理任务）"
+
+    def updater(self):
+        """每 10 分钟看一次仓库有没有新代码。host/ 里的程序变了就自己退出，systemd 十秒内拉起新版。"""
+        if not self.work.acquire(blocking=False):
+            return
+        try:
+            if self_update(self.env):
+                log("主机程序有更新，重启加载新版")
+                os._exit(0)
+        finally:
+            self.work.release()
 
     def monitor(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -273,7 +303,8 @@ class Host:
         log("主机程序启动", VERSION, "仓库", ROOT)
         threads = [threading.Thread(target=self.loop, args=(n, i, f), daemon=True, name=n)
                    for n, i, f in (("scheduler", 20, self.scheduler), ("jobs", 30, self.poll_jobs),
-                                   ("monitor", 15 * 60, self.monitor), ("heartbeat", 60, self.beat))]
+                                   ("monitor", 15 * 60, self.monitor), ("heartbeat", 60, self.beat),
+                                   ("updater", 10 * 60, self.updater))]
         for thread in threads:
             thread.start()
         try:

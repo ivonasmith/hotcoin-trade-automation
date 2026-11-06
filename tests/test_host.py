@@ -214,6 +214,37 @@ class CycleTest(unittest.TestCase):
         self.assertTrue(summary["errors"])
 
 
+class SelfUpdateTest(unittest.TestCase):
+    def test_restart_only_when_host_or_requirements_change(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            origin, clone = tmp / "origin", tmp / "clone"
+            run = lambda *a, cwd=None: subprocess.run(a, cwd=cwd, check=True, capture_output=True, text=True)
+            run("git", "init", "-q", "-b", "main", str(origin))
+            run("git", "config", "user.email", "t@t", cwd=origin)
+            run("git", "config", "user.name", "t", cwd=origin)
+            (origin / "host").mkdir()
+            (origin / "host" / "a.py").write_text("1")
+            (origin / "pipeline").mkdir()
+            (origin / "pipeline" / "x.py").write_text("1")
+            run("git", "add", "-A", cwd=origin)
+            run("git", "commit", "-q", "-m", "1", cwd=origin)
+            run("git", "clone", "-q", str(origin), str(clone))
+            old_root = host.ROOT
+            host.ROOT = clone
+            try:
+                self.assertFalse(host.self_update({}))  # 没有新提交
+                (origin / "pipeline" / "x.py").write_text("2")
+                run("git", "commit", "-q", "-am", "2", cwd=origin)
+                self.assertFalse(host.self_update({}))  # 只改了取数脚本：下次任务前自动拉取，不用重启
+                (origin / "host" / "a.py").write_text("2")
+                run("git", "commit", "-q", "-am", "3", cwd=origin)
+                self.assertTrue(host.self_update({}))  # 主机程序变了：要重启
+            finally:
+                host.ROOT = old_root
+
+
 class WorkerCallTest(unittest.TestCase):
     def test_watchlist_notify_heartbeat_over_http(self):
         import threading
