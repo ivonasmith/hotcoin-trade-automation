@@ -58,7 +58,10 @@ def fetch_daily(contract, getter, limit=1500):
     for base in monitor.FAPI_BASES:
         try:
             rows = getter(f"{base}/fapi/v1/klines?" + urllib.parse.urlencode({"symbol": contract, "interval": "1d", "limit": limit}))
-            return monitor.parse_klines(rows)
+            bars = monitor.parse_klines(rows)
+            for bar, row in zip(bars, rows):
+                bar["qv"] = float(row[7]) if len(row) > 7 else None   # 当天成交额（USDT）
+            return bars
         except Exception as exc:  # noqa: BLE001
             last = exc
     raise RuntimeError(f"{contract} 拉不到日线：{last}")
@@ -80,7 +83,7 @@ def universe(top_n, getter, bases, warnings):
             contract = sym if sym in bases else ("1000" + sym if "1000" + sym in bases else None)
             if contract:
                 rows.append({"symbol": sym, "name": row.get("name"), "mcap": row.get("market_cap"), "contract": contract,
-                             "cg_price": row.get("current_price"), "cg_rank": row.get("market_cap_rank")})
+                             "cg_price": row.get("current_price"), "cg_rank": row.get("market_cap_rank"), "cg_vol24": row.get("total_volume")})
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"市值榜取不到（{str(exc)[:80]}），改用币安 24h 成交额排序，口径不是市值")
         tickers = fetch_json(f"{monitor.FAPI_BASES[0]}/fapi/v1/ticker/24hr", getter)
@@ -92,7 +95,7 @@ def universe(top_n, getter, bases, warnings):
             sym = base[4:] if base.startswith("1000") else base
             if sym in STABLE_SYMBOLS or sym in {r["symbol"] for r in rows} or base not in bases:
                 continue
-            rows.append({"symbol": sym, "name": sym, "mcap": None, "contract": base, "cg_price": None, "cg_rank": None})
+            rows.append({"symbol": sym, "name": sym, "mcap": None, "contract": base, "cg_price": None, "cg_rank": None, "cg_vol24": None})
     return rows
 
 
@@ -154,7 +157,7 @@ def iso(d):
     return d.isoformat() if d else None
 
 
-def analyze(sym, bars, start, end):
+def analyze(sym, bars, start, end, min_turnover=5e6):
     dates = [day_of(b) for b in bars]
     closes = [b["close"] for b in bars]
     if start <= dates[0]:
@@ -181,6 +184,11 @@ def analyze(sym, bars, start, end):
                 hits[tag] = dates[i]
     res.update({k: iso(hits.get(k)) for k in ("up20", "up50", "up100")})
     res["max_rally"] = max((closes[i] / min(closes[lo + 1:i + 1]) - 1 for i in window), default=0)
+    # 成交活跃度：窗口内每天的币安永续成交额（USDT）
+    qv = sorted(b["qv"] for b in bars[lo + 1:hi + 1] if b.get("qv") is not None)
+    last30 = [b["qv"] for b in bars[-30:] if b.get("qv") is not None]
+    res["turnover"] = {"median": qv[len(qv) // 2] if qv else None, "min": qv[0] if qv else None,
+                       "last30_avg": sum(last30) / len(last30) if last30 else None}
     # 均线
     for period in (200, 365):
         ma = sma(closes, period)
@@ -218,6 +226,8 @@ def analyze(sym, bars, start, end):
     # 路径（按周，归一到基准日=100）
     res["path"] = [[iso(d), round(c / base * 100, 2)] for i, (d, c) in enumerate(zip(wd, wc)) if wlo <= i <= whi]
     res["structure"] = structure(res)
+    med = res["turnover"]["median"]
+    res["low_activity"] = med is not None and med < min_turnover
     return res
 
 
@@ -335,6 +345,21 @@ def bucket_lines(ranked):
     return out
 
 
+def money(v):
+    return "—" if v is None else (f"{v / 1e8:.1f}亿" if v >= 1e8 else f"{v / 1e4:,.0f}万")
+
+
+def activity_lines(ranked, threshold):
+    low = [c for c in ranked if c["low_activity"]]
+    act = [c for c in ranked if not c["low_activity"]]
+    med = lambda cs, key: sorted(c[key] for c in cs)[len(cs) // 2] if cs else None
+    out = [f"成交活跃度：窗口内币安永续日成交额中位数低于 {money(threshold)} 美元的“低活跃”币 {len(low)} 个"
+           + (f"（{'、'.join(c['symbol'] for c in low[:25])}{'…' if len(low) > 25 else ''}）" if low else "") + "。"]
+    if low and act:
+        out.append(f"低活跃组区间收益中位数 {pc(med(low, 'ret_end'), 0)}，高点前最大涨幅中位数 {pc(med(low, 'max_rally'), 0)}；活跃组分别是 {pc(med(act, 'ret_end'), 0)}、{pc(med(act, 'max_rally'), 0)}。")
+    return out
+
+
 def build_html(meta, ranked, skipped, btc):
     start, end = date.fromisoformat(meta["start"]), date.fromisoformat(meta["end"])
     by_start = sorted([c for c in ranked if c["up20"]], key=lambda c: (c["up20"], c["symbol"]))
@@ -351,11 +376,13 @@ def build_html(meta, ranked, skipped, btc):
         f"最先启动（相对区间低点首次 +20%）：{batch(by_start[:third])}；中段：{batch(by_start[third:2 * third])}；最后：{batch(by_start[2 * third:])}"
         + (f"；区间内没涨到 +20%：{'、'.join(never)}" if never else "") + "。",
         *bucket_lines(ranked),
+        *activity_lines(ranked, meta["min_turnover"]),
         "综合分前 5（按下表公式，只是排序，不是买卖建议）：" + "、".join(f"{c['symbol']}({c['composite']:.2f})" for c in top) + "。",
     ]
-    t1 = table(["币", "市值榜名次", "区间低点日", "+20%首日", "+50%首日", "+100%首日", "高点日", "低点→高点最大涨幅", "区间收益", "至今收益", "相对BTC", "高点至今"],
+    t1 = table(["币", "市值榜名次", "区间低点日", "+20%首日", "+50%首日", "+100%首日", "高点日", "低点→高点最大涨幅", "区间收益", "至今收益", "相对BTC", "高点至今", "窗口日均成交额(中位)", "活跃度"],
                [[c["symbol"], c.get("cg_rank") or "—", dt(c["low_date"]), dt(c["up20"]), dt(c["up50"]), dt(c["up100"]), dt(c["peak_date"]), pc(c["max_rally"], 0),
-                 pc(c["ret_end"]), pc(c["ret_now"]), pc(c["ret_end"] - btc["ret_end"]) if btc else "—", pc(c["from_peak_now"])]
+                 pc(c["ret_end"]), pc(c["ret_now"]), pc(c["ret_end"] - btc["ret_end"]) if btc else "—", pc(c["from_peak_now"]),
+                 money(c["turnover"]["median"]), "低活跃" if c["low_activity"] else "正常"]
                 for c in sorted(ranked, key=lambda c: (c["up20"] or "9999", c["symbol"]))])
     t2 = table(["币", "起点在MA200上", "站上MA200日", "站上MA365日", "两线都站上", "区间内收盘在MA200上占比", "现价距MA200", "现价距MA365", "MA200 20日斜率"],
                [[c["symbol"], yn(c["ma200"].get("above_at_base")), dt(c["ma200"].get("cross_date")) if c["ma200"].get("available") else "不足",
@@ -367,15 +394,21 @@ def build_html(meta, ranked, skipped, btc):
                [[c["symbol"], dt(c["macd_w"]["gold_cross"]), dt(c["macd_w"]["zero_cross"]), yn(c["macd_w"]["dif_above_zero_now"]),
                  "红(>0)" if c["macd_w"]["hist_now"] > 0 else "绿(<0)", "回升" if c["macd_w"]["hist_up_now"] else "走弱",
                  dt(c["macd_d"]["zero_cross"]), yn(c["macd_d"]["dif_above_zero_now"])] for c in ranked])
-    t4 = table(["排名", "币", "综合分", "启动早晚", "区间涨幅", "均线", "周线MACD", "价格结构"],
+    t4 = table(["排名", "币", "综合分", "启动早晚", "区间涨幅", "均线", "周线MACD", "价格结构", "活跃度"],
                [[i + 1, c["symbol"], f"{c['composite']:.2f}", f"{c['scores']['start']:.2f}", f"{c['scores']['ret']:.2f}", f"{c['scores']['ma']:.2f}",
-                 f"{c['scores']['macd']:.1f}", c["structure"]] for i, c in enumerate(ranked)])
+                 f"{c['scores']['macd']:.1f}", c["structure"], "低活跃" if c["low_activity"] else "正常"] for i, c in enumerate(ranked)])
+    has_low = any(c["low_activity"] or c.get("low_now") for c in ranked)
+    t5 = table(["币", "市值榜名次", "窗口日均成交额(中位)", "窗口最低日成交额", "近30日日均", "全市场24h成交额(CoinGecko)", "区间收益", "高点前最大涨幅", "+20%首日", "站上MA200日"],
+               [[c["symbol"], c.get("cg_rank") or "—", money(c["turnover"]["median"]), money(c["turnover"]["min"]), money(c["turnover"]["last30_avg"]),
+                 money(c.get("cg_vol24")), pc(c["ret_end"], 0), pc(c["max_rally"], 0), dt(c["up20"]), dt(c["ma200"].get("cross_date"))]
+                for c in sorted(ranked, key=lambda c: c["turnover"]["median"] if c["turnover"]["median"] is not None else 0) if c["low_activity"] or c.get("low_now")])
     notes = [
         "币种名单：" + meta["universe_note"],
         "“启动日”：相对到当天为止的区间最低收盘，第一次涨超 +20% / +50% / +100% 的日期；“高点”和“低点”均用收盘价。",
         "站上均线：收盘价从不高于 SMA 变成高于 SMA 的第一天；起点前一天已在均线上的，在“站上日”列显示“—”，排序和综合分里按“起点前就在上方”算最早。MA365 需要至少 365 根日线，不足显示“不足”。",
         "MACD 参数 12/26/9；周线按 ISO 周（周一到周日，UTC）取每周最后一根收盘，最后一周可能没走完；“金叉”= DIF 上穿 DEA，“零轴”= DIF 上穿 0。",
         "综合分 = 0.3×启动早晚分 + 0.3×区间收益分 + 0.2×均线分 + 0.2×周线MACD分（DIF在零轴上且柱子为红 1.0；仅DIF在零轴上 0.6；仅柱子为红 0.4；都不是 0）；各分项都是在本批币里的相对位置（最好 = 1）。权重是我定的，改权重会改排名。",
+        "成交活跃度：币安现货接口在这台服务器上取不到，所以用币安 U 本位永续合约的日成交额（USDT）当代理，窗口内取中位数；永续成交额通常高于同币现货，所以按同一个门槛会少标出一部分现货很冷清的币。另列 CoinGecko 的全市场 24h 成交额（现货为主、多交易所合计，只有“现在”这一个数）作对照。",
         "局限：名单按“现在”的市值榜取，区间里涨起来又掉出前列、或后来才上市的币不在内（幸存者偏差）；用的是永续合约价格，不是现货；没有计入资金费率。",
     ] + meta["warnings"]
     css = ("body{font:14px/1.6 -apple-system,'PingFang SC',sans-serif;margin:0;padding:16px;background:#fff;color:#1a1a1a;max-width:1100px;margin:auto}"
@@ -394,11 +427,12 @@ def build_html(meta, ranked, skipped, btc):
             "<h2>3. 200 日 / 365 日均线：谁先站上</h2>" + t2 +
             "<h2>4. MACD（周线为主，日线对照）</h2>" + t3 +
             "<h2>5. 价格结构与龙头综合排序</h2>" + t4 +
-            "<h2>6. 口径与局限</h2><ul class='note'>" + "".join(f"<li>{html.escape(s)}</li>" for s in notes) + "</ul></body></html>")
+            f"<h2>6. 低活跃币（窗口内日成交额中位数低于 {money(meta['min_turnover'])} 美元，或现在全市场24h成交额低于它）</h2>" + (t5 if has_low else "<p class='note'>没有符合条件的币。</p>") +
+            "<h2>7. 口径与局限</h2><ul class='note'>" + "".join(f"<li>{html.escape(s)}</li>" for s in notes) + "</ul></body></html>")
 
 
 # ---------- 主流程 ----------
-def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None):
+def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None, min_turnover=5e6):
     now = now or datetime.now(timezone.utc)
     warnings = []
     bases = perp_bases(getter)
@@ -419,11 +453,12 @@ def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None):
         if len(bars) < 230:
             skipped.append({"symbol": cand["symbol"], "skipped": f"日线只有 {len(bars)} 根，不够算 MA200"})
             continue
-        result = analyze(cand["symbol"], bars, start, end)
+        result = analyze(cand["symbol"], bars, start, end, min_turnover)
         if "skipped" in result:
             skipped.append(result)
             continue
-        result.update(name=cand["name"], cg_rank=cand["cg_rank"], mcap=cand["mcap"], contract=cand["contract"])
+        result.update(name=cand["name"], cg_rank=cand["cg_rank"], mcap=cand["mcap"], contract=cand["contract"], cg_vol24=cand.get("cg_vol24"))
+        result["low_now"] = cand.get("cg_vol24") is not None and cand["cg_vol24"] < min_turnover
         coins.append(result)
         time.sleep(0.15)
     if not coins:
@@ -433,7 +468,7 @@ def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None):
     if not btc:
         warnings.append("名单里没有 BTC，相对 BTC 一列为空")
     kind = "CoinGecko 市值榜（取数时的当前排名）" if all(c.get("cg_rank") for c in ranked) else "币安 24h 成交额排序"
-    meta = {"start": start.isoformat(), "end": end.isoformat(), "top_n": top_n, "generated": (now + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
+    meta = {"start": start.isoformat(), "end": end.isoformat(), "top_n": top_n, "min_turnover": min_turnover, "generated": (now + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
             "last_bar": max(c["last_date"] for c in ranked), "warnings": warnings,
             "universe_note": f"{kind}前 {len(ranked)} 个、币安有 USDT 永续合约，已剔除稳定币/包装币/黄金币；" + "；".join(
                 f"{s['symbol']} 未纳入（{s['skipped']}）" for s in skipped) if skipped else f"{kind}前 {len(ranked)} 个、币安有 USDT 永续合约，已剔除稳定币/包装币/黄金币"}
@@ -448,10 +483,11 @@ def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
     parser.add_argument("--top", type=int, default=200)
+    parser.add_argument("--min-turnover", type=float, default=5e6, help="日成交额低于这个数（美元）算低活跃")
     parser.add_argument("--start", default="2026-07-01")
     parser.add_argument("--end", default="2026-10-31")
     args = parser.parse_args(argv)
-    meta, ranked = run(date.fromisoformat(args.start), date.fromisoformat(args.end), args.top, args.out)
+    meta, ranked = run(date.fromisoformat(args.start), date.fromisoformat(args.end), args.top, args.out, min_turnover=args.min_turnover)
     print(f"完成：{len(ranked)} 个币，综合分前 5：" + "、".join(c["symbol"] for c in ranked[:5]))
     return 0
 

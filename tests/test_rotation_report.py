@@ -11,12 +11,19 @@ DAY0 = date(2025, 1, 1)
 NOW = datetime(2026, 11, 6, 3, 0, tzinfo=timezone.utc)
 
 
+QV = {}
+
+
+def qv(i):
+    return QV.get("v", 8e6)
+
+
 def rows(closes, first=DAY0):
     out = []
     for i, c in enumerate(closes):
         start = datetime.combine(first + timedelta(days=i), datetime.min.time(), tzinfo=timezone.utc)
         ms = int(start.timestamp() * 1000)
-        out.append([ms, str(c), str(c * 1.01), str(c * 0.99), str(c), "0", ms + 86400000 - 1])
+        out.append([ms, str(c), str(c * 1.01), str(c * 0.99), str(c), "0", ms + 86400000 - 1, str(qv(i))])
     return out
 
 
@@ -176,3 +183,40 @@ class RunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ActivityTest(unittest.TestCase):
+    def test_low_turnover_flagged_with_threshold_and_report_section(self):
+        curves = {"BTC": curve(date(2026, 7, 8), date(2026, 8, 1), 130), "THIN": curve(date(2026, 7, 5), date(2026, 7, 20), 220)}
+        market = FakeMarket(curves)
+        market.cg[1]["total_volume"] = 2_000_000
+        market.cg[0]["total_volume"] = 90_000_000
+        base_call = market.__call__
+
+        def getter(url):
+            if "symbol=THIN" in url:
+                QV["v"] = 3e6
+            else:
+                QV["v"] = 8e6
+            return base_call(url)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                meta, ranked = rr.run(START, END, 5, tmp, getter=getter, now=NOW)
+                by = {c["symbol"]: c for c in ranked}
+                self.assertTrue(by["THIN"]["low_activity"])
+                self.assertFalse(by["BTC"]["low_activity"])
+                self.assertAlmostEqual(by["THIN"]["turnover"]["median"], 3e6, delta=1)
+                self.assertTrue(by["THIN"]["low_now"])
+                page = (Path(tmp) / "rotation_report.html").read_text(encoding="utf-8")
+                self.assertIn("低活跃", page)
+                self.assertIn("300万", page)
+                self.assertIn("成交活跃度：窗口内币安永续日成交额中位数低于 500万", page)
+                meta2, ranked2 = rr.run(START, END, 5, tmp, getter=getter, now=NOW, min_turnover=1e6)
+                self.assertFalse(any(c["low_activity"] for c in ranked2))
+        finally:
+            QV.clear()
+
+    def test_money_format(self):
+        self.assertEqual(rr.money(5e6), "500万")
+        self.assertEqual(rr.money(2.5e8), "2.5亿")
+        self.assertEqual(rr.money(None), "—")
