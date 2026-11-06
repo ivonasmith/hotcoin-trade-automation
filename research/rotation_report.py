@@ -183,6 +183,15 @@ def analyze(sym, bars, start, end, min_turnover=5e6):
             if tag not in hits and closes[i] / run_min - 1 >= level:
                 hits[tag] = dates[i]
     res.update({k: iso(hits.get(k)) for k in ("up20", "up50", "up100")})
+    res["from_low_now"] = closes[-1] / closes[low_i] - 1
+    late, rm = None, run_min
+    if "up20" not in hits:   # 区间内没启动：看区间结束之后到现在有没有涨起来
+        for i in range(hi + 1, len(closes)):
+            rm = min(rm, closes[i])
+            if closes[i] / rm - 1 >= UP20:
+                late = dates[i]
+                break
+    res["up20_late"] = iso(late)
     res["max_rally"] = max((closes[i] / min(closes[lo + 1:i + 1]) - 1 for i in window), default=0)
     # 成交活跃度：窗口内每天的币安永续成交额（USDT）
     qv = sorted(b["qv"] for b in bars[lo + 1:hi + 1] if b.get("qv") is not None)
@@ -360,6 +369,17 @@ def activity_lines(ranked, threshold):
     return out
 
 
+def launch_queue(ranked, btc):
+    """启动观察队列：窗口内按 +20% 首日排队并分批；窗口后才启动的；至今没启动的。"""
+    started = sorted([c for c in ranked if c["up20"]], key=lambda c: (c["up20"], c["symbol"]))
+    n = len(started)
+    for i, c in enumerate(started):
+        c["batch"] = 1 + min(3, i * 4 // max(n, 1))
+    late = sorted([c for c in ranked if not c["up20"] and c["up20_late"]], key=lambda c: (c["up20_late"], c["symbol"]))
+    waiting = sorted([c for c in ranked if not c["up20"] and not c["up20_late"]], key=lambda c: -(c["ma200"].get("dist_now") if c["ma200"].get("available") else -9))
+    return started, late, waiting
+
+
 def build_html(meta, ranked, skipped, btc):
     start, end = date.fromisoformat(meta["start"]), date.fromisoformat(meta["end"])
     by_start = sorted([c for c in ranked if c["up20"]], key=lambda c: (c["up20"], c["symbol"]))
@@ -379,6 +399,30 @@ def build_html(meta, ranked, skipped, btc):
         *activity_lines(ranked, meta["min_turnover"]),
         "综合分前 5（按下表公式，只是排序，不是买卖建议）：" + "、".join(f"{c['symbol']}({c['composite']:.2f})" for c in top) + "。",
     ]
+    started, late, waiting = launch_queue(ranked, btc)
+    btc_day = date.fromisoformat(btc["up20"]) if btc and btc["up20"] else None
+    def vs_btc(day):
+        return "—" if not (btc_day and day) else f"{(date.fromisoformat(day) - btc_day).days:+d}天"
+    q1 = table(["序号", "币", "批次", "区间低点日", "启动日(+20%)", "相对BTC启动", "+50%首日", "市值榜名次", "区间收益", "至今收益", "现价距MA200", "周线MACD", "价格结构", "活跃度"],
+               [[i + 1, c["symbol"], f"第{c['batch']}批", dt(c["low_date"]), dt(c["up20"]), vs_btc(c["up20"]), dt(c["up50"]), c.get("cg_rank") or "—",
+                 pc(c["ret_end"], 0), pc(c["ret_now"], 0), pc(c["ma200"].get("dist_now")),
+                 ("零轴上" if c["macd_w"]["dif_above_zero_now"] else "零轴下") + ("·回升" if c["macd_w"]["hist_up_now"] else "·走弱"),
+                 c["structure"].split("（")[0], "低活跃" if c["low_activity"] else "正常"] for i, c in enumerate(started)])
+    q2 = table(["币", "市值榜名次", "窗口后启动日(+20%)", "距区间低点", "现价距MA200", "周线MACD", "价格结构", "活跃度"],
+               [[c["symbol"], c.get("cg_rank") or "—", dt(c["up20_late"]), pc(c["from_low_now"], 0), pc(c["ma200"].get("dist_now")),
+                 ("零轴上" if c["macd_w"]["dif_above_zero_now"] else "零轴下") + ("·回升" if c["macd_w"]["hist_up_now"] else "·走弱"),
+                 c["structure"].split("（")[0], "低活跃" if c["low_activity"] else "正常"] for c in late])
+    q3 = table(["币", "市值榜名次", "距区间低点", "现价距MA200", "现价距MA365", "周线MACD", "价格结构", "活跃度"],
+               [[c["symbol"], c.get("cg_rank") or "—", pc(c["from_low_now"], 0), pc(c["ma200"].get("dist_now")),
+                 pc(c["ma365"].get("dist_now")) if c["ma365"].get("available") else "—",
+                 ("零轴上" if c["macd_w"]["dif_above_zero_now"] else "零轴下") + ("·回升" if c["macd_w"]["hist_up_now"] else "·走弱"),
+                 c["structure"].split("（")[0], "低活跃" if c["low_activity"] else "正常"] for c in waiting])
+    queue_html = ("<h2>0. 启动观察队列（谁先谁后）</h2><p class='note'>排队依据：相对到当天为止的区间最低收盘，第一次涨超 +20% 的日期；按先后平均分成四批。</p>"
+                  f"<h3>已启动（区间内，共 {len(started)} 个）</h3>" + (q1 if started else "<p class='note'>无。</p>") +
+                  f"<h3>区间结束后才启动（共 {len(late)} 个）</h3>" + (q2 if late else "<p class='note'>无。</p>") +
+                  f"<h3>至今没启动（共 {len(waiting)} 个；按现价距MA200由高到低，接近或已站上的靠前）</h3>" + (q3 if waiting else "<p class='note'>无。</p>"))
+    for c in ranked:
+        c["queue"] = ("第%d批" % c["batch"]) if c.get("batch") else ("区间后启动" if c["up20_late"] else "未启动")
     t1 = table(["币", "市值榜名次", "区间低点日", "+20%首日", "+50%首日", "+100%首日", "高点日", "低点→高点最大涨幅", "区间收益", "至今收益", "相对BTC", "高点至今", "窗口日均成交额(中位)", "活跃度"],
                [[c["symbol"], c.get("cg_rank") or "—", dt(c["low_date"]), dt(c["up20"]), dt(c["up50"]), dt(c["up100"]), dt(c["peak_date"]), pc(c["max_rally"], 0),
                  pc(c["ret_end"]), pc(c["ret_now"]), pc(c["ret_end"] - btc["ret_end"]) if btc else "—", pc(c["from_peak_now"]),
@@ -415,13 +459,13 @@ def build_html(meta, ranked, skipped, btc):
            "h1{font-size:22px}h2{font-size:17px;margin-top:28px}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:12.5px}"
            "th,td{border-bottom:1px solid #ddd;padding:5px 8px;text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left;font-weight:600}"
            "th{background:#f4f4f4;position:sticky;top:0}svg{width:100%;height:auto;font-size:11px}svg text{fill:#555}.grid{stroke:#e3e3e3}.mark{stroke:#999;stroke-dasharray:3 3}"
-           "li{margin:4px 0}.note{color:#666;font-size:12.5px}"
+           "h3{font-size:14px;margin:18px 0 6px}li{margin:4px 0}.note{color:#666;font-size:12.5px}"
            "@media(prefers-color-scheme:dark){body{background:#15171a;color:#e8e8e8}th{background:#22262b}td,th{border-color:#333}svg text{fill:#aaa}.grid{stroke:#2c3036}.note{color:#999}}")
     return ("<!doctype html><html lang='zh'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
             f"<title>龙头与轮动研究 {start}~{end}</title><style>{css}</style></head><body>"
             f"<h1>龙头与轮动研究：{start} → {end}</h1><p class='note'>生成于 {meta['generated']}（北京时间） · 数据到 {meta['last_bar']}</p>"
-            "<h2>摘要</h2><ul>" + "".join(f"<li>{html.escape(s)}</li>" for s in summary) + "</ul>"
-            "<h2>1. 先涨后涨：谁先启动</h2>" + t1 +
+            "<h2>摘要</h2><ul>" + "".join(f"<li>{html.escape(s)}</li>" for s in summary) + "</ul>" +
+            queue_html + "<h2>1. 先涨后涨：全部币的明细</h2>" + t1 +
             "<h2>2. 区间走势（周收盘，基准日 = 100；虚线 = BTC，竖线 = 区间起止）</h2>" + chart([c for c in top if c is not btc], btc, start, end) +
             "<p class='note'>图里画的是综合分前 5 名和 BTC。</p>"
             "<h2>3. 200 日 / 365 日均线：谁先站上</h2>" + t2 +

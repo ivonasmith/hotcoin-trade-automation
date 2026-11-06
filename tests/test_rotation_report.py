@@ -147,7 +147,7 @@ class RunTest(unittest.TestCase):
             aaa = next(c for c in ranked if c["symbol"] == "AAA")
             self.assertLess(sol["up20"], aaa["up20"])
             page = (Path(tmp) / "rotation_report.html").read_text(encoding="utf-8")
-            for text in ("先涨后涨", "站上MA200日", "周线金叉日", "综合分", "SOL", "<svg"):
+            for text in ("启动观察队列", "至今没启动", "第1批", "先涨后涨", "站上MA200日", "周线金叉日", "综合分", "SOL", "<svg"):
                 self.assertIn(text, page)
             for word in ("建议买", "应该买", "建议卖"):
                 self.assertNotIn(word, page)
@@ -220,3 +220,29 @@ class ActivityTest(unittest.TestCase):
         self.assertEqual(rr.money(5e6), "500万")
         self.assertEqual(rr.money(2.5e8), "2.5亿")
         self.assertEqual(rr.money(None), "—")
+
+
+class QueueTest(unittest.TestCase):
+    def test_batches_late_and_waiting(self):
+        curves = {"BTC": curve(date(2026, 7, 8), date(2026, 8, 1), 130), "SOL": curve(date(2026, 7, 5), date(2026, 7, 20), 220),
+                  "AAA": curve(date(2026, 8, 25), date(2026, 9, 10), 250), "FLAT": [100.0] * N,
+                  "LATE": curve(date(2026, 7, 5), date(2026, 11, 1), 200)}
+        curves["LATE"] = [100.0 - min(i, 300) * 0 for i in range(N)]
+        for i in range(IDX(date(2026, 11, 1)), N):   # 区间结束（10-31）后才拉起来
+            curves["LATE"][i] = 100.0 * (1 + 0.1 * (i - IDX(date(2026, 11, 1)) + 1))
+        market = FakeMarket(curves)
+        with tempfile.TemporaryDirectory() as tmp:
+            meta, ranked = rr.run(START, END, 10, tmp, getter=market, now=NOW)
+            by = {c["symbol"]: c for c in ranked}
+            started, late, waiting = rr.launch_queue(ranked, by["BTC"])
+            self.assertEqual([c["symbol"] for c in started][0], "SOL")
+            self.assertEqual(by["SOL"]["batch"], 1)
+            self.assertEqual([c["symbol"] for c in started], ["SOL", "BTC", "AAA"])
+            self.assertEqual(by["AAA"]["batch"], 3)
+            self.assertEqual([c["symbol"] for c in late], ["LATE"])
+            self.assertEqual([c["symbol"] for c in waiting], ["FLAT"])
+            self.assertEqual(by["FLAT"]["queue"], "未启动")
+            self.assertEqual(by["LATE"]["queue"], "区间后启动")
+            page = (Path(tmp) / "rotation_report.html").read_text(encoding="utf-8")
+            self.assertIn("区间结束后才启动（共 1 个）", page)
+            self.assertIn("至今没启动（共 1 个", page)
