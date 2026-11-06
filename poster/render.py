@@ -9,6 +9,9 @@ import poster_gen as pg  # noqa: E402
 from build_data import build, verify  # noqa: E402
 
 
+# 小内存服务器（2GB）上少占内存：不用显卡、不用共享内存盘、不开多余后台功能。
+LOW_MEMORY_ARGS = ["--disable-gpu", "--disable-dev-shm-usage", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--no-first-run"]
+
 def names(issue):
     return {("zh", "desktop"): f"poster_zh_第{issue}期.png", ("zh", "mobile"): f"poster_zh_第{issue}期-手机版.png",
             ("en", "desktop"): f"poster_en_第{issue}期.png", ("en", "mobile"): f"poster_en_第{issue}期-手机版.png"}
@@ -39,7 +42,7 @@ def render(payload, outdir, launch=None):
         options = {}
         if os.environ.get("CHROMIUM_PATH"):
             options["executable_path"] = os.environ["CHROMIUM_PATH"]
-        browser = p.chromium.launch(**options)
+        browser = p.chromium.launch(args=LOW_MEMORY_ARGS, **options)
         for (lang, dev), name in names(payload["issue"]).items():
             page = browser.new_page(viewport={"width": 2400 if dev == "desktop" else 1080, "height": 1200}, device_scale_factor=2)
             page.set_content(htmls[(lang, dev)])

@@ -20,6 +20,9 @@ CTA = {
 }
 
 
+# 小内存服务器（2GB）上少占内存：不用显卡、不用共享内存盘、不开多余后台功能。
+LOW_MEMORY_ARGS = ["--disable-gpu", "--disable-dev-shm-usage", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--no-first-run"]
+
 def qr_svg(url=TG_LINK):
     """频道二维码（图片里的链接点不了，扫码进）。没装 segno 就不画，文字链接照样在。"""
     try:
@@ -178,7 +181,7 @@ def render(pack, outdir, launch=None):
         options = {}
         if os.environ.get("CHROMIUM_PATH"):
             options["executable_path"] = os.environ["CHROMIUM_PATH"]
-        br = pw.chromium.launch(**options)
+        br = pw.chromium.launch(args=LOW_MEMORY_ARGS, **options)
         for lang, key in (("zh", "zh_desktop"), ("en", "en_desktop")):
             name = names(pack["day"])[key]
             (out / f"weekend_{lang}.html").write_text(htmls[lang], encoding="utf-8")
