@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "host"))
 import monitor  # noqa: E402
 
-CG_URL = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1"
+CG_URL = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1"
 STABLE_SYMBOLS = {"USDT", "USDC", "DAI", "USDS", "USDE", "USD1", "USDG", "PYUSD", "RLUSD", "USDY", "USYC", "BUIDL", "USDF", "USDD",
                   "BFUSD", "USDGO", "OUSD", "FDUSD", "TUSD", "USDP", "GUSD", "FRAX", "LUSD", "SUSDS", "SUSDE", "USDTB", "USDX", "EURC"}
 SKIP_NAME = re.compile(r"(wrapped|staked|bridged|restaked|liquid staking|\bgold\b|tether gold|pax gold|treasury|heloc|\bwbtc\b|\bweth\b|usd)", re.I)
@@ -321,6 +321,20 @@ def chart(coins, btc, start, end):
     return "".join(parts)
 
 
+def bucket_lines(ranked):
+    """按市值榜名次分档，看大币和小币谁先启动、涨幅中位数。"""
+    out = []
+    for lo, hi, name in ((1, 30, "前30名"), (31, 100, "31–100名"), (101, 10 ** 6, "101名以后")):
+        group = [c for c in ranked if c.get("cg_rank") and lo <= c["cg_rank"] <= hi]
+        if not group:
+            continue
+        days = sorted(date.fromisoformat(c["up20"]).toordinal() for c in group if c["up20"])
+        rets = sorted(c["ret_end"] for c in group)
+        mid = date.fromordinal(days[len(days) // 2]).isoformat()[5:] if days else "—"
+        out.append(f"{name}（{len(group)}个）：+20%首日中位数 {mid}，{len(days)}/{len(group)} 个涨到过 +20%；区间收益中位数 {pc(rets[len(rets) // 2], 0)}。")
+    return out
+
+
 def build_html(meta, ranked, skipped, btc):
     start, end = date.fromisoformat(meta["start"]), date.fromisoformat(meta["end"])
     by_start = sorted([c for c in ranked if c["up20"]], key=lambda c: (c["up20"], c["symbol"]))
@@ -336,6 +350,7 @@ def build_html(meta, ranked, skipped, btc):
         f"BTC 区间收益 {pc(btc['ret_end']) if btc else '—'}；站上 MA200 的币：起点 {above_base}/{n} → 现在 {above_now}/{n}。",
         f"最先启动（相对区间低点首次 +20%）：{batch(by_start[:third])}；中段：{batch(by_start[third:2 * third])}；最后：{batch(by_start[2 * third:])}"
         + (f"；区间内没涨到 +20%：{'、'.join(never)}" if never else "") + "。",
+        *bucket_lines(ranked),
         "综合分前 5（按下表公式，只是排序，不是买卖建议）：" + "、".join(f"{c['symbol']}({c['composite']:.2f})" for c in top) + "。",
     ]
     t1 = table(["币", "市值榜名次", "区间低点日", "+20%首日", "+50%首日", "+100%首日", "高点日", "低点→高点最大涨幅", "区间收益", "至今收益", "相对BTC", "高点至今"],
@@ -390,7 +405,7 @@ def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None):
     candidates = universe(top_n, getter, bases, warnings)
     coins, skipped = [], []
     for cand in candidates:
-        if len(coins) + len(skipped) >= top_n + 12 or len(coins) >= top_n:
+        if len(coins) >= top_n:
             break
         try:
             bars = [b for b in fetch_daily(cand["contract"], getter) if b["close_time"] < int(now.timestamp() * 1000)]
@@ -432,7 +447,7 @@ def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None):
 def main(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", required=True)
-    parser.add_argument("--top", type=int, default=30)
+    parser.add_argument("--top", type=int, default=200)
     parser.add_argument("--start", default="2026-07-01")
     parser.add_argument("--end", default="2026-10-31")
     args = parser.parse_args(argv)
