@@ -289,6 +289,7 @@ export class Flow {
     const flow=await this.getFlow(job.day);
     if(flow && flow.ledger_job===job.id) await this.s.put(this.flowKey(job.day),{...flow,ledger_status:body.ok?'written':'failed',ledger_result:body.result||null});
     if(body.ok) {
+      await this.d.onLedgerWritten?.(job);
       const actions=(body.result?.actions||[]);
       await this.say(`台账已由程序写入 Notion：${actions.length?actions.join('；'):'没有需要新增的内容（之前已写过）'}。`);
     } else {

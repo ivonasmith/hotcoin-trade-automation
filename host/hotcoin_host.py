@@ -3,7 +3,8 @@
 四件事，各跑各的线程：
 1. 定时取数：工作日 19:00 取当日数据上传后台；周日 18:00 取下周清单数据送审（北京时间，错过会补跑，补到窗口结束）。
 2. 海报与台账任务：每 30 秒问后台有没有待办，有就在本机出图 / 写 Notion 台账（和 GitHub Actions 里的 job_runner 是同一份代码）。
-3. 15 分钟监控：读 Telegram 里 /watch 设的清单，拉币安合约行情，条件到了发 Telegram 提醒。
+3. 15 分钟监控：读 Telegram 里 /watch 设的清单，加上后台“今日监控计划”（当日分析的关键价位自动生成的规则），
+   拉币安合约行情，条件到了发 Telegram 提醒（自动规则的提醒带分析上下文，并有节流，见 autowatch.py）。
 4. 心跳：每 60 秒告诉后台“我活着”。超过 15 分钟没心跳，后台会发 Telegram 告警。
 
 GitHub Actions 里的原定时任务保留当备用；后台对重复上传是幂等的（快照覆盖，周日清单重复送审会被拒收）。
@@ -28,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = Path(os.environ.get("HOTCOIN_ENV_FILE", "/etc/hotcoin/host.env"))
 STATE_FILE = Path(os.environ.get("HOTCOIN_STATE_FILE", "/var/lib/hotcoin/state.json"))
 RUN_DIR = Path(os.environ.get("HOTCOIN_RUN_DIR", "/var/lib/hotcoin/run"))
+AUTO_STATE_FILE = Path(os.environ.get("HOTCOIN_AUTO_STATE_FILE", str(STATE_FILE.parent / "auto_monitor.json")))
 USER_AGENT = "hotcoin-host/" + VERSION
 RETRY_GAP = timedelta(minutes=10)
 
@@ -59,7 +61,8 @@ def load_env(path=None, environ=os.environ):
     path = Path(path or ENV_FILE)
     if path.exists():
         values.update(parse_env_text(path.read_text(encoding="utf-8")))
-    for key in ("WORKER_INGEST_URL", "PIPELINE_SECRET", "NOTION_TOKEN", "NOTION_API_KEY", "HOTCOIN_HTTP_PROXY"):
+    for key in ("WORKER_INGEST_URL", "PIPELINE_SECRET", "NOTION_TOKEN", "NOTION_API_KEY", "HOTCOIN_HTTP_PROXY",
+                "HOTCOIN_AUTO_QUIET", "HOTCOIN_AUTO_CAP"):
         if environ.get(key) and key not in values:
             values[key] = environ[key]
     return values
@@ -104,6 +107,11 @@ def worker_call(env, method, path, body=None, timeout=30):
 
 def fetch_watchlist(env):
     return worker_call(env, "GET", "/pipeline/watchlist").get("rules") or []
+
+
+def fetch_plan(env):
+    """今日监控计划；后台还没生成过就是 None。"""
+    return worker_call(env, "GET", "/pipeline/plan").get("plan")
 
 
 def notify(env, text, fired=None):
@@ -241,6 +249,8 @@ class Host:
         self.env = env
         self.state = load_state()
         self.monitor_state = {}
+        self.auto_state = None
+        self.plan = None
         self.status = {"started": datetime.now(BJ).isoformat(), "monitor": None, "jobs": None, "scheduler": None}
         self.stop = threading.Event()
         self.work = threading.Lock()  # 有任务在跑时不更新、不重启
@@ -290,11 +300,38 @@ class Host:
         finally:
             self.work.release()
 
+    def current_plan(self):
+        """读最新计划；后台暂时读不到就沿用上次读到的（过期与否由 autowatch 判断）。"""
+        try:
+            self.plan = fetch_plan(self.env)
+        except Exception as exc:  # noqa: BLE001
+            log("读监控计划失败，沿用上次的：", str(exc)[:200])
+        return self.plan
+
     def monitor(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import autowatch
         import monitor
-        summary = monitor.run_cycle(fetch_watchlist(self.env), self.monitor_state, lambda text, ids: notify(self.env, text, ids))
-        self.status["monitor"] = f"规则{summary['rules']}条，触发{summary['fired']}条" + (f"，错误{len(summary['errors'])}" if summary["errors"] else "")
+        parts = []
+        try:
+            summary = monitor.run_cycle(fetch_watchlist(self.env), self.monitor_state, lambda text, ids: notify(self.env, text, ids))
+            parts.append(f"手动规则{summary['rules']}条，触发{summary['fired']}条" + (f"，错误{len(summary['errors'])}" if summary["errors"] else ""))
+        except Exception as exc:  # noqa: BLE001 - 手动规则出错不拦自动规则
+            parts.append("手动规则出错：" + str(exc)[:80])
+            log("手动规则出错：", str(exc)[:300])
+        try:
+            if self.auto_state is None:
+                self.auto_state = autowatch.load_state(AUTO_STATE_FILE)
+            auto = autowatch.run_auto_cycle(self.current_plan(), self.auto_state, lambda text: notify(self.env, text),
+                                            getter=monitor.http_json, settings=autowatch.settings_from_env(self.env))
+            autowatch.save_state(self.auto_state, AUTO_STATE_FILE)
+            parts.append(autowatch.status_text(auto))
+            for error in auto["errors"][:3]:
+                log("自动规则：", error)
+        except Exception as exc:  # noqa: BLE001
+            parts.append("自动规则出错：" + str(exc)[:80])
+            log("自动规则出错：", str(exc)[:300])
+        self.status["monitor"] = "；".join(parts)
 
     def beat(self):
         heartbeat(self.env, dict(self.status))
@@ -320,10 +357,16 @@ def main(argv):
     if missing:
         print("环境文件缺少：" + "、".join(missing) + f"（文件：{ENV_FILE}）")
         return 1
-    if "--once" in argv:  # 手动：立刻跑一轮监控并打印
+    if "--once" in argv:  # 手动：立刻跑一轮监控（手动规则 + 自动规则）并打印；自动规则的状态照常写进本地状态文件
         sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import autowatch
         import monitor
         print(json.dumps(monitor.run_cycle(fetch_watchlist(env), {}, lambda text, ids: notify(env, text, ids)), ensure_ascii=False))
+        state = autowatch.load_state(AUTO_STATE_FILE)
+        auto = autowatch.run_auto_cycle(fetch_plan(env), state, lambda text: notify(env, text), getter=monitor.http_json,
+                                        settings=autowatch.settings_from_env(env))
+        autowatch.save_state(state, AUTO_STATE_FILE)
+        print(json.dumps(auto, ensure_ascii=False))
         return 0
     if "--run" in argv:  # 手动：立刻跑一个定时任务，例如 --run collect
         name = argv[argv.index("--run") + 1]

@@ -4,6 +4,7 @@ import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {Flow,tgErrorReason} from './flow.mjs';
 import {parseWatch,addRule,removeRules,applyFired,describeRule,USAGE as WATCH_USAGE} from './watch.mjs';
+import {buildPlan,appendLedgerOrder,describePlan} from './plan.mjs';
 import {randomToken,sha256,matches,isAdmin,seal,unseal,escapeHTML,adminFormToken,validAdminPost} from './security.mjs';
 
 const SCOPES='tweet.read tweet.write users.read media.write offline.access';
@@ -322,7 +323,18 @@ export class TradeDesk {
   }
   flow(env) {
     return new Flow(this.ctx,env,{telegram,tgUpload:telegramUpload,tgChannelPhoto:telegramChannelPhoto,tgDownload:telegramDownload,provider,
-      translate:(e,text,system,promptFn)=>generateDraft(e,text,draftProvider(e),system,promptFn)});
+      translate:(e,text,system,promptFn)=>generateDraft(e,text,draftProvider(e),system,promptFn),
+      onLedgerWritten:job=>this.planAfterLedger(job)});
+  }
+  // 今日监控计划：快照上传时生成，台账写入成功后把新挂单补进去。失败只记不抛，不影响上传和台账流程。
+  async planAfterLedger(job) {
+    try {
+      const order=job?.payload?.order;
+      if(!order) return;
+      const plan=await this.ctx.storage.get('plan:current');
+      const next=appendLedgerOrder(plan,order,job.payload.issue);
+      if(next && next!==plan) await this.ctx.storage.put('plan:current',next);
+    } catch { /* best effort */ }
   }
   // Durable Object alarm: publish slots (zh 20:00 / en 21:00 Beijing) and the poster-job watchdog.
   async alarm() {
@@ -362,6 +374,8 @@ export class TradeDesk {
     const store=this.ctx.storage;
     if(path==='/pipeline/watchlist' && request.method==='GET')
       return json({ok:true,rules:(await store.get('watchlist'))||[]});
+    if(path==='/pipeline/plan' && request.method==='GET')
+      return json({ok:true,now:Date.now(),plan:(await store.get('plan:current'))||null});
     if(request.method!=='POST') return json({ok:false},404);
     if(Number(request.headers.get('Content-Length')||0)>100000) return json({ok:false},413);
     const body=await request.json();
@@ -473,7 +487,13 @@ export class TradeDesk {
       if(!metrics || !['BTC','ETH','SOL','XRP','BNB'].every(symbol=>metrics[symbol]))
         return json({ok:false,error:'核心币数据不完整'},400);
       await this.ctx.storage.put('snapshot:'+day,{...snapshot,received_at:Date.now()});
-      return json({ok:true,day,received_at:Date.now()});
+      let planRules=null;
+      try {
+        const plan=buildPlan(snapshot,buildOrderPlan(snapshot,day),Date.now());
+        await this.ctx.storage.put('plan:current',plan);
+        planRules=plan.rules.length;
+      } catch { /* 计划生成失败不影响快照上传；主机沿用旧计划直到过期 */ }
+      return json({ok:true,day,received_at:Date.now(),plan_rules:planRules});
     }
     if(path==='/pipeline/weekly' && request.method==='POST') {
       const auth=request.headers.get('Authorization')||'';
@@ -495,7 +515,7 @@ export class TradeDesk {
       const result=await this.flow(env).startWeekly(day,{pack});
       return json({ok:result.status===200,...result,status:undefined},result.status);
     }
-    if(path==='/pipeline/watchlist' || path==='/pipeline/notify' || path==='/pipeline/heartbeat')
+    if(path==='/pipeline/watchlist' || path==='/pipeline/plan' || path==='/pipeline/notify' || path==='/pipeline/heartbeat')
       return this.hostRoutes(request,url,path,env);
     if(path.startsWith('/pipeline/jobs/')) {
       const auth=request.headers.get('Authorization')||'';
@@ -776,6 +796,10 @@ export class TradeDesk {
     }
     if(text==='/host') {
       await this.hostStatus(env,reply);
+      return json({ok:true});
+    }
+    if(text==='/plan' || text.startsWith('/plan ')) {
+      await reply(describePlan(await this.ctx.storage.get('plan:current'),text.split(/\s+/)[1]||''));
       return json({ok:true});
     }
     if(text==='/draft') return this.makeDraft(chat,env);
