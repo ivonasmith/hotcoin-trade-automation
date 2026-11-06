@@ -9,6 +9,14 @@ ENV_FILE=/etc/hotcoin/host.env
 if [ "$(id -u)" -ne 0 ]; then echo "请用 root 运行（前面加 sudo）"; exit 1; fi
 say() { printf '\n== %s\n' "$*"; }
 
+say "0/6 交换空间（内存只有 2GB 时出图要用）"
+MEM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)"
+if [ "$MEM_MB" -lt 3500 ] && ! swapon --show | grep -q .; then
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo "已加 2GB 交换空间"
+fi
+
 say "1/6 系统组件"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
