@@ -10,11 +10,14 @@
 GitHub Actions 里的原定时任务保留当备用；后台对重复上传是幂等的（快照覆盖，周日清单重复送审会被拒收）。
 密钥只放在服务器的环境文件里（默认 /etc/hotcoin/host.env，权限 600），不进仓库。
 """
+import base64
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -29,6 +32,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = Path(os.environ.get("HOTCOIN_ENV_FILE", "/etc/hotcoin/host.env"))
 STATE_FILE = Path(os.environ.get("HOTCOIN_STATE_FILE", "/var/lib/hotcoin/state.json"))
 RUN_DIR = Path(os.environ.get("HOTCOIN_RUN_DIR", "/var/lib/hotcoin/run"))
+RESEARCH_QUEUE = ROOT / "research" / "queue.json"
+RESEARCH_STATE_FILE = Path(os.environ.get("HOTCOIN_RESEARCH_STATE_FILE", str(STATE_FILE.parent / "research.json")))
 AUTO_STATE_FILE = Path(os.environ.get("HOTCOIN_AUTO_STATE_FILE", str(STATE_FILE.parent / "auto_monitor.json")))
 USER_AGENT = "hotcoin-host/" + VERSION
 RETRY_GAP = timedelta(minutes=10)
@@ -103,6 +108,60 @@ def worker_call(env, method, path, body=None, timeout=30):
             return json.loads(response.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"后台返回 {exc.code}：{exc.read().decode('utf-8', 'replace')[:200]}")
+
+
+def send_document(env, name, data, caption=""):
+    """把一个文件（bytes）发到审核人的 Telegram。"""
+    worker_call(env, "POST", "/pipeline/document", {"name": name, "content_b64": base64.b64encode(data).decode(), "caption": caption}, timeout=120)
+
+
+def run_research(env, state_path=None, queue_path=None, runner=None, sender=None, notifier=None, workdir=None):
+    """研究任务队列：research/queue.json 里每个 id 只跑一次（失败最多再试一次），报告文件发到 Telegram。
+    队列由仓库提供（我改代码、推送，主机 10 分钟内自己拉到），不用登录服务器。"""
+    state_path, queue_path = state_path or RESEARCH_STATE_FILE, queue_path or RESEARCH_QUEUE
+    runner, sender, notifier = runner or run_step, sender or send_document, notifier or notify
+    try:
+        queue = json.loads(Path(queue_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    try:
+        state = json.loads(Path(state_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        state = {}
+    ran = []
+    for job in queue:
+        job_id, script = str(job.get("id", "")), str(job.get("script", ""))
+        entry = state.setdefault(job_id, {"attempts": 0})
+        if not job_id or entry.get("done") or entry["attempts"] >= 2:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_]+\.py", script) or not (Path(queue_path).parent / script).is_file():
+            entry["attempts"] = 2
+            entry["error"] = "脚本名不合法或不存在"
+            continue
+        entry["attempts"] += 1
+        Path(state_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(state_path).write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        out_dir = Path(workdir or tempfile.mkdtemp(prefix="research-")) / job_id
+        title = str(job.get("title") or job_id)
+        try:
+            _, tail = runner([sys.executable, str(Path(queue_path).parent / script), "--out", str(out_dir), *[str(a) for a in job.get("args", [])]],
+                             env, ROOT, timeout=1800)
+            files = sorted(p for p in out_dir.iterdir() if p.is_file())
+            if not files:
+                raise RuntimeError("脚本跑完了但没有输出文件")
+            for path in files:
+                sender(env, path.name, path.read_bytes(), title if path == files[0] else "")
+            notifier(env, f"研究报告已发送：{title}（{len(files)} 个文件）\n{tail.strip()[-300:]}")
+            entry.update(done=datetime.now(BJ).isoformat(), error=None)
+        except Exception as exc:  # noqa: BLE001
+            entry["error"] = str(exc)[:300]
+            try:
+                notifier(env, f"研究任务失败：{title}（第 {entry['attempts']} 次）\n{str(exc)[:600]}" + ("\n10 分钟后自动再试一次" if entry["attempts"] < 2 else "\n不再自动重试"))
+            except Exception:  # noqa: BLE001
+                pass
+        ran.append(job_id)
+        Path(state_path).write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    return ran
 
 
 def fetch_watchlist(env):
@@ -333,6 +392,11 @@ class Host:
             log("自动规则出错：", str(exc)[:300])
         self.status["monitor"] = "；".join(parts)
 
+    def research(self):
+        with self.work:
+            ran = run_research(self.env)
+        self.status["research"] = f"刚跑 {','.join(ran)}" if ran else "ok"
+
     def beat(self):
         heartbeat(self.env, dict(self.status))
 
@@ -340,7 +404,7 @@ class Host:
         log("主机程序启动", VERSION, "仓库", ROOT)
         threads = [threading.Thread(target=self.loop, args=(n, i, f), daemon=True, name=n)
                    for n, i, f in (("scheduler", 20, self.scheduler), ("jobs", 30, self.poll_jobs),
-                                   ("monitor", 15 * 60, self.monitor), ("heartbeat", 60, self.beat),
+                                   ("monitor", 15 * 60, self.monitor), ("heartbeat", 60, self.beat), ("research", 10 * 60, self.research),
                                    ("updater", 10 * 60, self.updater))]
         for thread in threads:
             thread.start()

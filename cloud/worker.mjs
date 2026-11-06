@@ -143,12 +143,12 @@ async function telegram(env,method,payload) {
 }
 
 // Poster PNGs are sent as documents (full resolution; photos would be recompressed).
-async function telegramUpload(env,name,bytes,caption) {
+async function telegramUpload(env,name,bytes,caption,mime='image/png') {
   if(!env.TELEGRAM_BOT_TOKEN) throw Error('未配置Telegram');
   const form=new FormData();
   form.append('chat_id',String(env.TELEGRAM_OWNER_ID));
   form.append('caption',caption);
-  form.append('document',new Blob([bytes],{type:'image/png'}),name);
+  form.append('document',new Blob([bytes],{type:mime}),name);
   return provider(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`,{method:'POST',body:form},60000);
 }
 // Channel post: a real photo when Telegram accepts it (<=10MB, width+height<=10000, ratio<=20), otherwise the original PNG as a file.
@@ -377,8 +377,19 @@ export class TradeDesk {
     if(path==='/pipeline/plan' && request.method==='GET')
       return json({ok:true,now:Date.now(),plan:(await store.get('plan:current'))||null});
     if(request.method!=='POST') return json({ok:false},404);
-    if(Number(request.headers.get('Content-Length')||0)>100000) return json({ok:false},413);
+    const limit=path==='/pipeline/document'?5*1024*1024:100000;
+    if(Number(request.headers.get('Content-Length')||0)>limit) return json({ok:false},413);
     const body=await request.json();
+    if(path==='/pipeline/document') {   // 主机把研究报告等文件发到审核人的 Telegram
+      const name=String(body.name||'').replace(/[^\w.\-\u4e00-\u9fa5]/g,'_').slice(0,80);
+      let bytes;
+      try { bytes=Uint8Array.from(atob(String(body.content_b64||'')),c=>c.charCodeAt(0)); } catch { bytes=null; }
+      if(!name || !bytes || !bytes.length) return json({ok:false,error:'文件名或内容不对'},400);
+      if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
+      const mime=name.endsWith('.html')?'text/html':name.endsWith('.json')?'application/json':'application/octet-stream';
+      await telegramUpload(env,name,bytes,String(body.caption||'').slice(0,900),mime);
+      return json({ok:true});
+    }
     if(path==='/pipeline/notify') {
       const text=String(body.text||'').slice(0,3500);
       if(!text) return json({ok:false,error:'没有内容'},400);
@@ -515,7 +526,7 @@ export class TradeDesk {
       const result=await this.flow(env).startWeekly(day,{pack});
       return json({ok:result.status===200,...result,status:undefined},result.status);
     }
-    if(path==='/pipeline/watchlist' || path==='/pipeline/plan' || path==='/pipeline/notify' || path==='/pipeline/heartbeat')
+    if(path==='/pipeline/watchlist' || path==='/pipeline/plan' || path==='/pipeline/notify' || path==='/pipeline/document' || path==='/pipeline/heartbeat')
       return this.hostRoutes(request,url,path,env);
     if(path.startsWith('/pipeline/jobs/')) {
       const auth=request.headers.get('Authorization')||'';
