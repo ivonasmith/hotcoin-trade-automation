@@ -202,11 +202,16 @@ def evaluate_rules(plan, state, now_ms, getter, summary):
         interval = INTERVAL_OF.get(rule["kind"])
         if not interval:
             continue
+        gate = None
+        if rule.get("requires"):   # 成交后才监控的规则：进场价触及的提醒发出过，才开始判，且只看那之后收盘的线
+            gate = (states.get(rule["requires"]) or {}).get("fired_at")
+            if gate is None:
+                continue
         bars = bars_for(rule["sym"], interval)
         if not bars:
             continue
         st = states.setdefault(rule["key"], {"fired_at": None, "armed": True, "away": False})
-        created = int(rule.get("created") or plan.get("built_at") or 0)
+        created = max(int(rule.get("created") or plan.get("built_at") or 0), int(gate or 0))
         rearm = float((coins.get(rule["sym"]) or {}).get("rearm_pct") or 0.5)
         fired_at = st.get("fired_at")
         if fired_at is not None and not st.get("armed", True):

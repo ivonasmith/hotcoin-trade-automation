@@ -121,13 +121,29 @@ export function orderRules(item,info,src='ledger',created) {
   const extra={note,...(created?{created}:{})};
   const rules=[];
   if(item.status==='挂单中') {
+    let after=null;   // 成交后才开始监控的规则：以“进场价触及”提醒发出过为前提（程序不知道什么时候成交，只能这样判断）
     if(entry!==null) {
       const tag=src==='order'?'当日新单进场价':'台账挂单进场价';
+      const touch=touchKind(entry,price,short);
       rules.push(rule(sym,'near',entry,src,tag,{...extra,band:info.near_pct}));
-      rules.push(rule(sym,touchKind(entry,price,short),entry,src,tag,extra));
+      rules.push(rule(sym,touch,entry,src,tag,extra));
+      after={...extra,requires:ruleKey(sym,touch,entry)};
     }
     if(short && info.ma50!==null) rules.push(rule(sym,'dayup',info.ma50,src,'作废条件（成交前日线收盘站上MA50）',extra));
-    if(target!==null) rules.push(rule(sym,touchKind(target,price,!short),target,src,short?'目标价（成交前先到则作废）':'目标价',extra));
+    if(target!==null) rules.push(rule(sym,touchKind(target,price,!short),target,src,short?'目标价（成交后=止盈到价；成交前先到则作废）':'目标价',extra));
+    if(after) {
+      if(stop!==null) {
+        rules.push(rule(sym,touchKind(stop,price,short),stop,src,'止损价（成交后；按日线收盘判断，触及不等于触发）',after));
+        rules.push(rule(sym,short?'dayup':'daydown',stop,src,'止损价日线收盘确认（成交后）',after));
+      }
+      if(short && entry!==null && stop!==null && stop>entry) {
+        const risk=stop-entry;
+        for(const [multiple,text] of [[2,'2R价位（成交后；规则里止损下移到进场价）'],[3,'3R价位（成交后；规则里止损跟随MA20下移）']]) {
+          const value=entry-multiple*risk;
+          if(value>0 && (price===null || value<price)) rules.push(rule(sym,'down',value,src,text,after));
+        }
+      }
+    }
   } else if(item.status==='持仓中') {
     const stopLevel=stopNow!==null?stopNow:stop;
     if(stopLevel!==null) {
@@ -190,7 +206,7 @@ export function appendLedgerOrder(plan,ledgerOrder,issue,now=Date.now()) {
 export function ruleText(item) {
   const value=item.kind==='surge' || item.kind==='plunge'?`${item.value}%`
     :item.kind==='near'?`${fmtPrice(item.value)}（±${item.band}%）`:fmtPrice(item.value);
-  return `${KIND_TEXT[item.kind]||item.kind} ${value}｜${item.tag}`;
+  return `${KIND_TEXT[item.kind]||item.kind} ${value}｜${item.tag}${item.requires?'｜进场价触及后才监控':''}`;
 }
 const bjStamp=ms=>new Date(ms+BJ_OFFSET).toISOString().slice(5,16).replace('T',' ');
 // Telegram /plan 的回复：不带币就是总览，带币就列出这个币的全部规则。

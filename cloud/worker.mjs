@@ -813,6 +813,18 @@ export class TradeDesk {
       await reply(describePlan(await this.ctx.storage.get('plan:current'),text.split(/\s+/)[1]||''));
       return json({ok:true});
     }
+    if(text==='/replan') {   // 用今天已上传的快照重新生成监控计划（规则逻辑更新后不用重新取数）
+      const day=beijingDay(),snapshot=await this.ctx.storage.get('snapshot:'+day);
+      if(!snapshot) await reply(`今天（${day}）还没有收到快照，没法重建计划。`);
+      else {
+        try {
+          const plan=buildPlan(snapshot,buildOrderPlan(snapshot,day),Date.now());
+          await this.ctx.storage.put('plan:current',plan);
+          await reply(`监控计划已按今天的快照重建：${plan.rules.length} 条规则。主机下一轮（15 分钟内）自动读取。`);
+        } catch(error) { await reply('重建失败：'+String(error.message||error).slice(0,200)); }
+      }
+      return json({ok:true});
+    }
     if(text==='/draft') return this.makeDraft(chat,env);
     let response;
     await this.ctx.storage.transaction(async tx=>{

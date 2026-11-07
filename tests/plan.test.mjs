@@ -73,7 +73,17 @@ test('台账挂单：进场价接近+触及，空单还盯 MA50 作废和目标�
   const ledger={ok:true,updated_to:'2026-11-08',active:[{issue:31,symbol:'SOL',side:'做空',status:'挂单中',entry:105,stop:107.1,target:96.6}]};
   const plan=buildPlan(snapshot({ledger}),null,NOW);
   const mine=plan.rules.filter(r=>r.sym==='SOL'&&r.src==='ledger');
-  assert.deepEqual(mine.map(r=>r.kind+':'+r.value).sort(),['dayup:'+metrics.SOL.ma50,'down:96.6','near:105','up:105'].sort());
+  assert.deepEqual(mine.filter(r=>!r.requires).map(r=>r.kind+':'+r.value).sort(),['dayup:'+metrics.SOL.ma50,'down:96.6','near:105','up:105'].sort());
+  // 成交后才监控的：止损触及 + 日收确认 + 2R/3R；前提是“进场价触及”提醒发出过
+  const post=mine.filter(r=>r.requires);
+  assert.deepEqual(post.map(r=>r.kind).sort(),['dayup','down','down','up']);
+  assert.ok(post.every(r=>r.requires===ruleKey('SOL','up',105)));
+  assert.equal(post.find(r=>r.kind==='up').value,107.1);
+  assert.equal(post.find(r=>r.kind==='dayup').value,107.1);
+  assert.deepEqual(post.filter(r=>r.kind==='down').map(r=>+r.value.toFixed(2)).sort((a,b)=>a-b),[98.7,100.8]);
+  assert.match(post.find(r=>r.kind==='up').tag,/止损价（成交后/);
+  assert.match(mine.find(r=>r.kind==='down'&&!r.requires).tag,/成交后=止盈到价；成交前先到则作废/);
+  assert.ok(ruleText(post.find(r=>r.kind==='up')).endsWith('进场价触及后才监控'));
   const near=mine.find(r=>r.kind==='near');
   assert.equal(near.band,1);   // 日线 ATR 4% 的四分之一 = 1%
   assert.match(near.note,/^台账：第31期 \$SOL 做空挂单中｜进场 105｜止损 107\.1｜目标 96\.6$/);
@@ -177,7 +187,7 @@ test('/plan 文字：总览和单币',()=>{
   const plan=buildPlan(snapshot({ledger}),null,NOW);
   const overview=describePlan(plan,'',NOW+3600000);
   assert.match(overview,/今日监控计划：11-09 19:05 生成（北京时间），有效到 11-10 20:00；\d+ 条规则，21 个币/);
-  assert.match(overview,/SOL \d+条（含台账\/新单 4）/);
+  assert.match(overview,/SOL \d+条（含台账\/新单 8）/);
   const sol=describePlan(plan,'sol',NOW);
   assert.match(sol,/SOL 共 \d+ 条/);
   assert.match(sol,/价格接近 105（±1%）｜台账挂单进场价/);

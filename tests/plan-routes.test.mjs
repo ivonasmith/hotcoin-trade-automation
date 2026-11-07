@@ -106,3 +106,23 @@ test('台账任务写入成功后，新挂单进入计划；失败或没有新�
     assert.equal(JSON.stringify(entries.get('plan:current')),before);
   } finally {restore();}
 });
+
+test('/replan：用今天已有的快照重建计划，没有快照就说明；只认审核人',async()=>{
+  const {desk,entries,sent,restore}=rig();
+  try {
+    await hook(desk,1,'/replan');
+    assert.match(sent.at(-1).text,/还没有收到快照/);
+    await pipe(desk,'/pipeline/snapshot','POST',snapshot());
+    entries.set('plan:current',{marker:'old',rules:[],coins:{},built_at:1,expires_at:2});
+    await hook(desk,2,'/replan');
+    assert.match(sent.at(-1).text,/监控计划已按今天的快照重建：\d+ 条规则/);
+    const plan=entries.get('plan:current');
+    assert.equal(plan.marker,undefined);
+    assert.equal(plan.rules.some(r=>r.sym==='SOL'&&r.requires),true);   // 挂单的成交后止损/止盈规则
+    const count=sent.length;
+    await desk.fetch(new Request('https://desk.test/telegram/webhook',{method:'POST',
+      headers:{'Content-Type':'application/json','X-Telegram-Bot-Api-Secret-Token':'hook'},
+      body:JSON.stringify({update_id:3,message:{chat:{id:999,type:'private'},from:{id:999},text:'/replan'}})}));
+    assert.equal(sent.length,count);
+  } finally {restore();}
+});

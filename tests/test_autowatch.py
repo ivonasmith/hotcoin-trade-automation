@@ -157,6 +157,44 @@ class FireTest(unittest.TestCase):
         self.assertEqual(c.run(bj(2026, 11, 9, 22, 15))["fired"], 1)
 
 
+class PostFillTest(unittest.TestCase):
+    ENTRY = "SOL|up|105"
+
+    def rules(self):
+        entry = mk("SOL", "up", 105, src="ledger", tag="台账挂单进场价", note="台账：x")
+        stop = mk("SOL", "up", 107.1, src="ledger", tag="止损价（成交后；按日线收盘判断，触及不等于触发）", note="台账：x")
+        stop["requires"] = self.ENTRY
+        r2 = mk("SOL", "down", 100.8, src="ledger", tag="2R价位（成交后）", note="台账：x")
+        r2["requires"] = self.ENTRY
+        return [entry, stop, r2]
+
+    def test_stop_and_take_profit_wait_for_entry_touch_then_only_count_later_bars(self):
+        c = Cycle(plan_of(self.rules()))
+        # 进场价没碰到：就算价格冲到止损位、掉到 2R 位，也不提醒（还没成交）
+        c.feed.set("SOL", "15m", [kl(bj(2026, 11, 9, 20, 45), 104, 104.5, 100.0, 101.0)])
+        self.assertEqual(c.run(bj(2026, 11, 9, 21, 0))["fired"], 0)
+        self.assertNotIn("SOL|up|107.1", c.state["rules"])
+        # 碰到进场价：只发进场价这一条
+        c.feed.set("SOL", "15m", [kl(bj(2026, 11, 9, 21, 0), 104, 105.4, 103.9, 105.2)])
+        summary = c.run(bj(2026, 11, 9, 21, 15))
+        self.assertEqual(summary["fired"], 1)
+        self.assertIn("SOL 价格涨到 105", c.sent[0])
+        # 同一根线里的 2R/3R 不补判；之后收盘的线才算：先到止损
+        c.feed.set("SOL", "15m", [kl(bj(2026, 11, 9, 21, 15), 105.2, 107.4, 105.0, 107.2)])
+        summary = c.run(bj(2026, 11, 9, 21, 30))
+        self.assertEqual(summary["fired"], 1)
+        self.assertIn("SOL 价格涨到 107.1", c.sent[-1])
+        self.assertIn("止损价（成交后", c.sent[-1])
+
+    def test_take_profit_after_fill(self):
+        c = Cycle(plan_of(self.rules()))
+        c.feed.set("SOL", "15m", [kl(bj(2026, 11, 9, 21, 0), 104, 105.4, 103.9, 105.2)])
+        c.run(bj(2026, 11, 9, 21, 15))
+        c.feed.set("SOL", "15m", [kl(bj(2026, 11, 9, 21, 15), 105.2, 105.3, 100.5, 101.0)])
+        c.run(bj(2026, 11, 9, 21, 30))
+        self.assertTrue(any("SOL 价格跌到 100.8" in t and "2R价位（成交后）" in t for t in c.sent))
+
+
 class RearmTest(unittest.TestCase):
     def test_same_level_needs_six_hours_and_price_leaving_before_firing_again(self):
         c = Cycle(plan_of([mk("SOL", "up", 105)]))   # rearm_pct = 1.0 → 价格要回到 103.95 以下
