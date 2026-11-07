@@ -7,6 +7,7 @@
 // kind：up/down 价格触及；dayup/daydown 日线收盘；h4up/h4down 4h 收盘；surge/plunge 15 分钟涨跌幅 %；near 进入价位附近。
 // src：ledger（台账在场单，最高优先、不受静默和上限限制）、order（当日新单）、level（关键位）、ma（MA200）、vol（异常波动）。
 import {TRADABLE,fmtPrice,fmtPct} from './order.mjs';
+import {buildCards,PAPER} from './paper.mjs';
 
 export const PLAN_VERSION=1;
 export const MONITOR_COINS=[...TRADABLE];           // 和程序可出单名单、日更取数覆盖的 21 个币一致
@@ -188,9 +189,10 @@ export function buildPlan(snapshot,orderPlan,now=Date.now()) {
   }
   const rules=mergeRules(all);
   const finished=Date.parse(snapshot?.report?.finished_at||'');
+  const {cards,macro}=buildCards(snapshot);   // 纸面交易机会卡：主机在提醒触发时按卡片给价位和仓位
   return {version:PLAN_VERSION,day:snapshot?.day||null,built_at:now,expires_at:planExpiry(now),
     snapshot_at:Number.isFinite(finished)?finished:null,ledger_updated_to:snapshot?.ledger?.updated_to||null,
-    order_symbol:order?order.symbol:null,coins,rules};
+    order_symbol:order?order.symbol:null,coins,rules,cards,macro,paper:PAPER};
 }
 
 // 台账任务写入成功后：把刚写进台账的新挂单加进计划（同一个价位的当日新单规则被台账规则取代）。

@@ -33,7 +33,7 @@ export function expiryText(day,days=VALID_DAYS) {
 }
 
 // Why a core coin produced no candidate, in plain words, from the gate fields the screen records.
-function whyNoCandidate(symbol,screen) {
+export function whyNoCandidate(symbol,screen) {
   if(!screen) return `$${symbol}：筛选结果缺失`;
   const gate1=String(screen['门①']||''),gate2=String(screen['门②']||'');
   if(gate1.startsWith('未过')) return `$${symbol}：${gate1.replace('未过：','')}`;

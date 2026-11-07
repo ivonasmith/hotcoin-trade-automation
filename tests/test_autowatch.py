@@ -447,14 +447,15 @@ class HostWiringTest(unittest.TestCase):
         plan = plan_of([mk("SOL", "up", 105)])
         plan["expires_at"] = ms(bj(2026, 11, 12, 0))
         plan["built_at"] = 0
-        patched = {"fetch_watchlist": host.fetch_watchlist, "fetch_plan": host.fetch_plan, "notify": host.notify,
-                   "AUTO_STATE_FILE": host.AUTO_STATE_FILE}
+        patched = {"fetch_watchlist": host.fetch_watchlist, "fetch_plan_full": host.fetch_plan_full, "notify": host.notify,
+                   "AUTO_STATE_FILE": host.AUTO_STATE_FILE, "PAPER_FILE": host.PAPER_FILE}
         real_http, real_run = monitor.http_json, autowatch.run_auto_cycle
         with tempfile.TemporaryDirectory() as tmp:
             try:
                 host.AUTO_STATE_FILE = Path(tmp) / "auto.json"
+                host.PAPER_FILE = Path(tmp) / "paper.json"
                 host.fetch_watchlist = lambda env: (_ for _ in ()).throw(RuntimeError("后台 500"))   # 手动规则读失败
-                host.fetch_plan = lambda env: plan
+                host.fetch_plan_full = lambda env: {"plan": plan}
                 host.notify = lambda env, text, fired=None: sent.append(text)
                 monitor.http_json = feed
                 h = host.Host({"WORKER_INGEST_URL": "https://x.workers.dev", "PIPELINE_SECRET": "s"})
@@ -468,7 +469,7 @@ class HostWiringTest(unittest.TestCase):
                 self.assertIn("SOL 价格涨到 105", sent[0])
                 self.assertTrue(host.AUTO_STATE_FILE.exists())
                 # 读计划失败：沿用上次的，不抛
-                host.fetch_plan = lambda env: (_ for _ in ()).throw(RuntimeError("断网"))
+                host.fetch_plan_full = lambda env: (_ for _ in ()).throw(RuntimeError("断网"))
                 h.monitor()
                 self.assertIs(h.plan, plan)
             finally:

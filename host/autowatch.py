@@ -137,7 +137,7 @@ def latest_closed_open(bars, now_ms):
 
 
 # ---------- 一轮 ----------
-def run_auto_cycle(plan, state, notify, now_ms=None, getter=monitor.http_json, settings=None):
+def run_auto_cycle(plan, state, notify, now_ms=None, getter=monitor.http_json, settings=None, paper=None):
     """跑一轮。notify(text) 发一条 Telegram。返回给 /host 看的摘要。"""
     now_ms = now_ms or int(time.time() * 1000)
     settings = {**DEFAULTS, **(settings or {})}
@@ -157,6 +157,12 @@ def run_auto_cycle(plan, state, notify, now_ms=None, getter=monitor.http_json, s
         summary["rules"] = len(plan["rules"])
         new_items = evaluate_rules(plan, state, now_ms, getter, summary)
         summary["fired"] = len(new_items)
+        if paper:   # 纸面账本：每条触发的提醒进账本，机会卡的价位/仓位附在提醒后面；账本出错不影响提醒本身
+            for item in new_items:
+                try:
+                    item["paper"] = paper.handle_alert(item, plan, now_ms, getter)
+                except Exception as exc:  # noqa: BLE001
+                    summary["errors"].append("纸面账本：" + str(exc)[:100])
     deliver(plan, state, new_items, notify, now_ms, settings, summary)
     summary.update(sent_today=state["sent_today"], held=len(state["held"]), suppressed=state["suppressed_today"])
     return summary
@@ -324,6 +330,7 @@ def format_messages(plan, send, now_ms, notice=None):
             lines.append(f"{prefix}{it['text']}")
             if it.get("tag"):
                 lines.append(f"  ↳ {it['tag']}")
+            lines.extend((it.get("paper") or {}).get("lines") or [])
         analysis = (coins.get(sym) or {}).get("analysis")
         if analysis:
             lines.append(f"  分析（取数 {analysed}）：{analysis}")

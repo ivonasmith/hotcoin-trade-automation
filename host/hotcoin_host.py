@@ -35,6 +35,7 @@ RUN_DIR = Path(os.environ.get("HOTCOIN_RUN_DIR", "/var/lib/hotcoin/run"))
 RESEARCH_QUEUE = ROOT / "research" / "queue.json"
 RESEARCH_STATE_FILE = Path(os.environ.get("HOTCOIN_RESEARCH_STATE_FILE", str(STATE_FILE.parent / "research.json")))
 AUTO_STATE_FILE = Path(os.environ.get("HOTCOIN_AUTO_STATE_FILE", str(STATE_FILE.parent / "auto_monitor.json")))
+PAPER_FILE = Path(os.environ.get("HOTCOIN_PAPER_FILE", str(STATE_FILE.parent / "paper.json")))
 USER_AGENT = "hotcoin-host/" + VERSION
 RETRY_GAP = timedelta(minutes=10)
 
@@ -170,7 +171,11 @@ def fetch_watchlist(env):
 
 def fetch_plan(env):
     """今日监控计划；后台还没生成过就是 None。"""
-    return worker_call(env, "GET", "/pipeline/plan").get("plan")
+    return fetch_plan_full(env).get("plan")
+
+
+def fetch_plan_full(env):
+    return worker_call(env, "GET", "/pipeline/plan")
 
 
 def notify(env, text, fired=None):
@@ -311,6 +316,8 @@ class Host:
         self.monitor_state = {}
         self.auto_state = None
         self.plan = None
+        self.paper_request = 0
+        self.paper = None
         self.status = {"started": datetime.now(BJ).isoformat(), "monitor": None, "jobs": None, "scheduler": None}
         self.stop = threading.Event()
         self.work = threading.Lock()  # 有任务在跑时不更新、不重启
@@ -363,7 +370,9 @@ class Host:
     def current_plan(self):
         """读最新计划；后台暂时读不到就沿用上次读到的（过期与否由 autowatch 判断）。"""
         try:
-            self.plan = fetch_plan(self.env)
+            full = fetch_plan_full(self.env)
+            self.plan = full.get("plan")
+            self.paper_request = int(full.get("paper_request") or 0)
         except Exception as exc:  # noqa: BLE001
             log("读监控计划失败，沿用上次的：", str(exc)[:200])
         return self.plan
@@ -382,8 +391,13 @@ class Host:
         try:
             if self.auto_state is None:
                 self.auto_state = autowatch.load_state(AUTO_STATE_FILE)
-            auto = autowatch.run_auto_cycle(self.current_plan(), self.auto_state, lambda text: notify(self.env, text),
-                                            getter=monitor.http_json, settings=autowatch.settings_from_env(self.env))
+            if self.paper is None:
+                import paper as paper_module
+                self.paper = paper_module.Paper(PAPER_FILE)
+            plan = self.current_plan()
+            settings = autowatch.settings_from_env(self.env)
+            auto = autowatch.run_auto_cycle(plan, self.auto_state, lambda text: notify(self.env, text),
+                                            getter=monitor.http_json, settings=settings, paper=self.paper)
             autowatch.save_state(self.auto_state, AUTO_STATE_FILE)
             parts.append(autowatch.status_text(auto))
             for error in auto["errors"][:3]:
@@ -391,6 +405,20 @@ class Host:
         except Exception as exc:  # noqa: BLE001
             parts.append("自动规则出错：" + str(exc)[:80])
             log("自动规则出错：", str(exc)[:300])
+        try:
+            if self.paper is not None:
+                now_ms = int(time.time() * 1000)
+                quiet = autowatch.in_quiet(now_ms, autowatch.settings_from_env(self.env).get("quiet"))
+                errors = self.paper.cycle(now_ms, monitor.http_json, lambda text: notify(self.env, text), quiet,
+                                          self.paper_request, lambda name, data, caption: send_document(self.env, name, data, caption))
+                state = self.paper.state
+                parts.append(f"纸面账本：{sum(1 for t in state['trades'] if t['paper'] and t['status'] == 'open')}张在场/"
+                             f"{len(state['trades'])}条记录" + (f"，错误{len(errors)}" if errors else ""))
+                for error in errors[:3]:
+                    log("纸面账本：", error)
+        except Exception as exc:  # noqa: BLE001
+            parts.append("纸面账本出错：" + str(exc)[:80])
+            log("纸面账本出错：", str(exc)[:300])
         self.status["monitor"] = "；".join(parts)
 
     def research(self):
@@ -427,9 +455,10 @@ def main(argv):
         import autowatch
         import monitor
         print(json.dumps(monitor.run_cycle(fetch_watchlist(env), {}, lambda text, ids: notify(env, text, ids)), ensure_ascii=False))
+        import paper as paper_module
         state = autowatch.load_state(AUTO_STATE_FILE)
         auto = autowatch.run_auto_cycle(fetch_plan(env), state, lambda text: notify(env, text), getter=monitor.http_json,
-                                        settings=autowatch.settings_from_env(env))
+                                        settings=autowatch.settings_from_env(env), paper=paper_module.Paper(PAPER_FILE))
         autowatch.save_state(state, AUTO_STATE_FILE)
         print(json.dumps(auto, ensure_ascii=False))
         return 0

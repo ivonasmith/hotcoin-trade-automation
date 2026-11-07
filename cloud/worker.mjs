@@ -375,7 +375,7 @@ export class TradeDesk {
     if(path==='/pipeline/watchlist' && request.method==='GET')
       return json({ok:true,rules:(await store.get('watchlist'))||[]});
     if(path==='/pipeline/plan' && request.method==='GET')
-      return json({ok:true,now:Date.now(),plan:(await store.get('plan:current'))||null});
+      return json({ok:true,now:Date.now(),plan:(await store.get('plan:current'))||null,paper_request:(await store.get('paper:request'))||0});
     if(request.method!=='POST') return json({ok:false},404);
     const limit=path==='/pipeline/document'?5*1024*1024:100000;
     if(Number(request.headers.get('Content-Length')||0)>limit) return json({ok:false},413);
@@ -811,6 +811,11 @@ export class TradeDesk {
     }
     if(text==='/plan' || text.startsWith('/plan ')) {
       await reply(describePlan(await this.ctx.storage.get('plan:current'),text.split(/\s+/)[1]||''));
+      return json({ok:true});
+    }
+    if(text==='/paper') {   // 要一份纸面交易复盘：记个时间，主机下一轮（15 分钟内）发过来
+      await this.ctx.storage.put('paper:request',Date.now());
+      await reply('已记下。主机下一轮（15 分钟内）会把纸面交易复盘（摘要 + 完整记录）发过来。');
       return json({ok:true});
     }
     if(text==='/replan') {   // 用今天已上传的快照重新生成监控计划（规则逻辑更新后不用重新取数）
