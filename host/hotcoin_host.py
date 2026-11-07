@@ -238,9 +238,10 @@ def calendar_open(env):
     return json.loads(out.strip().splitlines()[-1]).get("ok") is True
 
 
-def task_collect(env):
+def task_collect(env, force=False):
+    """force=True（手动 --run collect --force）：周末/节假日也跑，用来演练全流程。"""
     update_repo(env)
-    if not calendar_open(env):
+    if not force and not calendar_open(env):
         log("今天不发布（日历），跳过取数")
         return
     out = RUN_DIR / "runtime"
@@ -254,7 +255,7 @@ def task_collect(env):
     run_step([py, "pipeline/upload_snapshot.py", str(out)], env, ROOT, timeout=300)
 
 
-def task_weekly(env):
+def task_weekly(env, force=False):
     update_repo(env)
     run_step([sys.executable, "pipeline/weekly_collect.py"], env, ROOT, timeout=1200)
 
@@ -434,7 +435,7 @@ def main(argv):
         return 0
     if "--run" in argv:  # 手动：立刻跑一个定时任务，例如 --run collect
         name = argv[argv.index("--run") + 1]
-        TASKS[name](env)
+        TASKS[name](env, force="--force" in argv)
         return 0
     Host(env).run()
     return 0
