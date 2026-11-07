@@ -1,6 +1,6 @@
 [
  {
-  "id": "rotation-20261107c",
+  "id": "rotation-20261107d",
   "script": "rotation_report.py",
   "args": [
    "--top",
@@ -12,6 +12,6 @@
    "--anchor",
    "2026-08-19"
   ],
-  "title": "龙头与轮动研究（以8-19 BTC拉升为锚点：先行/跟涨/掉队）"
+  "title": "龙头与轮动研究（图表版 + 明细）"
  }
 ]

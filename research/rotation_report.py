@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "host"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import monitor  # noqa: E402
 
 CG_URL = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1"
@@ -610,7 +611,13 @@ def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None, min_turn
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "rotation_report.html").write_text(build_html(meta, ranked, skipped, btc), encoding="utf-8")
-    (out / "rotation_data.json").write_text(json.dumps({"meta": meta, "coins": ranked, "skipped": skipped}, ensure_ascii=False, indent=1), encoding="utf-8")
+    data = {"meta": meta, "coins": ranked, "skipped": skipped}
+    (out / "rotation_data.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    try:   # 图表版（一页统计图）；出错不影响明细报告
+        import rotation_charts
+        (out / "rotation_charts.html").write_text(rotation_charts.build(json.loads(json.dumps(data, ensure_ascii=False))), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        meta["warnings"].append("图表版没生成：" + str(exc)[:100])
     return meta, ranked
 
 

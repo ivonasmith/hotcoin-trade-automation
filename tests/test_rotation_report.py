@@ -154,7 +154,20 @@ class RunTest(unittest.TestCase):
             for word in ("建议买", "应该买", "建议卖"):
                 self.assertNotIn(word, page)
             self.assertTrue((Path(tmp) / "rotation_data.json").stat().st_size > 1000)
+            charts = (Path(tmp) / "rotation_charts.html").read_text(encoding="utf-8")
+            for text in ("图表版", "1. 谁先启动", "3. 大币和小币", "4. 均线与结构", "5. 区间收益前", "<svg"):
+                self.assertIn(text, charts)
+            self.assertNotIn("2. BTC 拉升前后", charts)       # 没传锚点就没有这一节
             self.assertTrue(all("scores" in c and 0 <= c["composite"] <= 1 for c in ranked))
+
+    def test_charts_with_anchor_have_classes_and_scatter(self):
+        curves = {"BTC": curve(date(2026, 8, 20), date(2026, 8, 22), 130), "SOL": curve(date(2026, 7, 5), date(2026, 7, 20), 220),
+                  "AAA": curve(date(2026, 8, 25), date(2026, 9, 10), 250)}
+        with tempfile.TemporaryDirectory() as tmp:
+            rr.run(START, END, 3, tmp, getter=FakeMarket(curves), now=NOW, anchor=date(2026, 8, 19))
+            charts = (Path(tmp) / "rotation_charts.html").read_text(encoding="utf-8")
+            for text in ("2. BTC 拉升前后", "每个点 = 一个币", "8. 龙头清单", "<circle", "7. 成交额和涨幅"):
+                self.assertIn(text, charts)
 
     def test_price_mismatch_is_skipped_as_namesake(self):
         curves = {"BTC": curve(date(2026, 7, 8), date(2026, 8, 1), 130), "SOL": curve(date(2026, 7, 5), date(2026, 7, 20), 220)}
