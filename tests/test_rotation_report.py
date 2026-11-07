@@ -61,8 +61,10 @@ class FakeMarket:
             return self.cg
         if "exchangeInfo" in url:
             return {"symbols": [{"baseAsset": s, "contractType": "PERPETUAL", "quoteAsset": "USDT", "status": "TRADING"} for s in self.curves]}
-        sym = url.split("symbol=")[1].split("&")[0].replace("USDT", "")
-        return rows(self.curves[sym])
+        raw = url.split("symbol=")[1].split("&")[0]
+        if not raw.endswith("USDT"):   # 真实接口要 BTCUSDT 这种合约名，只传 BTC 会 400
+            raise RuntimeError("HTTP Error 400: Bad Request")
+        return rows(self.curves[raw[:-4]])
 
 
 class IndicatorTest(unittest.TestCase):
