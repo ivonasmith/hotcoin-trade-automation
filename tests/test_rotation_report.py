@@ -236,15 +236,18 @@ class QueueTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             meta, ranked = rr.run(START, END, 10, tmp, getter=market, now=NOW)
             by = {c["symbol"]: c for c in ranked}
-            started, late, waiting = rr.launch_queue(ranked, by["BTC"])
+            started, late, waiting = rr.launch_queue(ranked, by["BTC"], END)
             self.assertEqual([c["symbol"] for c in started][0], "SOL")
             self.assertEqual(by["SOL"]["batch"], 1)
-            self.assertEqual([c["symbol"] for c in started], ["SOL", "BTC", "AAA"])
-            self.assertEqual(by["AAA"]["batch"], 3)
+            self.assertEqual([c["symbol"] for c in started], ["SOL", "AAA", "BTC"])   # BTC 涨得慢，+50% 反而最晚
+            self.assertEqual(by["AAA"]["batch"], 2)
+            self.assertEqual(by["BTC"]["batch"], 3)
             self.assertEqual([c["symbol"] for c in late], ["LATE"])
             self.assertEqual([c["symbol"] for c in waiting], ["FLAT"])
             self.assertEqual(by["FLAT"]["queue"], "未启动")
             self.assertEqual(by["LATE"]["queue"], "区间后启动")
             page = (Path(tmp) / "rotation_report.html").read_text(encoding="utf-8")
             self.assertIn("区间结束后才启动（共 1 个）", page)
+            self.assertTrue(by["SOL"]["w50"] < by["AAA"]["w50"] < by["BTC"]["w50"])
+            self.assertIsNone(by["FLAT"]["w50"])
             self.assertIn("至今没启动（共 1 个", page)
