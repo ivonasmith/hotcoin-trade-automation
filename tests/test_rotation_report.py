@@ -251,3 +251,54 @@ class QueueTest(unittest.TestCase):
             self.assertTrue(by["SOL"]["w50"] < by["AAA"]["w50"] < by["BTC"]["w50"])
             self.assertIsNone(by["FLAT"]["w50"])
             self.assertIn("至今没启动（共 1 个", page)
+
+
+class AnchorTest(unittest.TestCase):
+    ANCHOR = date(2026, 8, 19)
+
+    def curves(self):
+        a, b = IDX(self.ANCHOR), IDX(date(2026, 6, 30))
+
+        def mk(pre_end, post_pct):
+            """6-30 之前 100；6-30→锚点前一天线性涨到 pre_end；锚点后 40 天每天加 post_pct（占锚点前价格），之后不动。"""
+            out = []
+            for i in range(N):
+                if i <= b:
+                    out.append(100.0)
+                elif i < a:
+                    out.append(100 + (pre_end - 100) * (i - b) / (a - 1 - b))
+                else:
+                    out.append(pre_end * (1 + post_pct * (min(i - a, 39) + 1)))
+            return out
+        return {"BTC": mk(100, 0.01), "LEAD": mk(150, 0.02), "FADE": mk(150, 0.0), "LATE": mk(100, 0.03), "WEAK": mk(100, 0.0)}
+
+    def test_classes_reaction_speed_and_report_section(self):
+        market = FakeMarket(self.curves())
+        with tempfile.TemporaryDirectory() as tmp:
+            meta, ranked = rr.run(START, END, 10, tmp, getter=market, now=NOW, anchor=self.ANCHOR)
+            by = {c["symbol"]: c for c in ranked}
+            self.assertEqual(by["LEAD"]["anchor_class"], "龙头（先行且续强）")
+            self.assertEqual(by["FADE"]["anchor_class"], "先行后掉队")
+            self.assertEqual(by["LATE"]["anchor_class"], "后发跟涨")
+            self.assertEqual(by["WEAK"]["anchor_class"], "落后")
+            self.assertAlmostEqual(by["LEAD"]["anchor"]["pre_ret"], 0.5, places=3)
+            self.assertAlmostEqual(by["LATE"]["anchor"]["r30"], 0.9, places=3)
+            self.assertEqual(by["LATE"]["anchor"]["react20"], 6)         # 第 7 天收盘 = +21%（0.03×7）
+            self.assertEqual(by["BTC"]["anchor"]["react20"], 19)
+            self.assertIsNone(by["WEAK"]["anchor"]["react20"])
+            self.assertEqual(by["LATE"]["anchor"]["peak_date"], (self.ANCHOR + timedelta(days=39)).isoformat())
+            self.assertTrue(by["LEAD"]["anchor"]["above200_pre"] is not None)
+            page = (Path(tmp) / "rotation_report.html").read_text(encoding="utf-8")
+            self.assertIn("A. 以 2026-08-19 为锚点", page)
+            self.assertIn("龙头（先行且续强，共 1 个）", page)
+            self.assertIn("以 2026-08-19 为锚点：BTC 锚点前", page)
+
+    def test_no_anchor_keeps_old_report_and_anchor_after_data_is_safe(self):
+        market = FakeMarket(self.curves())
+        with tempfile.TemporaryDirectory() as tmp:
+            meta, ranked = rr.run(START, END, 10, tmp, getter=market, now=NOW)
+            self.assertFalse(any("anchor" in c for c in ranked))
+            page = (Path(tmp) / "rotation_report.html").read_text(encoding="utf-8")
+            self.assertNotIn("为锚点", page)
+            meta, ranked = rr.run(START, END, 10, tmp, getter=market, now=NOW, anchor=date(2030, 1, 1))
+            self.assertTrue(all(c["anchor_class"] == "无法分类" for c in ranked if "anchor_class" in c))

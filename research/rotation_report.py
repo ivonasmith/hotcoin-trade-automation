@@ -157,7 +157,7 @@ def iso(d):
     return d.isoformat() if d else None
 
 
-def analyze(sym, bars, start, end, min_turnover=5e6):
+def analyze(sym, bars, start, end, min_turnover=5e6, anchor=None):
     dates = [day_of(b) for b in bars]
     closes = [b["close"] for b in bars]
     if start <= dates[0]:
@@ -237,10 +237,59 @@ def analyze(sym, bars, start, end, min_turnover=5e6):
                      "dif_above_zero_base": wdif[wlo] > 0}
     # 路径（按周，归一到基准日=100）
     res["path"] = [[iso(d), round(c / base * 100, 2)] for i, (d, c) in enumerate(zip(wd, wc)) if wlo <= i <= whi]
+    if anchor:
+        res["anchor"] = anchor_metrics(dates, closes, ma_cache(closes), wd, wdif, whist, lo, base, anchor)
     res["structure"] = structure(res)
     med = res["turnover"]["median"]
     res["low_activity"] = med is not None and med < min_turnover
     return res
+
+
+def ma_cache(closes):
+    return {200: sma(closes, 200), 365: sma(closes, 365)}
+
+
+def anchor_metrics(dates, closes, mas, wd, wdif, whist, lo, base, anchor):
+    """以“锚点日”（BTC 大幅拉升、确认小周期行情的那天）为界：之前谁先动，之后谁跟得快、涨到哪、现在回撤多少。"""
+    a_i = next((i for i, d in enumerate(dates) if d >= anchor), None)
+    if a_i is None or a_i <= lo + 1:
+        return None
+    pre = closes[a_i - 1]
+    out = {"pre_close": pre, "pre_ret": pre / base - 1}
+    pre_idx = range(lo + 1, a_i)
+    out["pre_max_rally"] = max(closes[i] / min(closes[lo + 1:i + 1]) - 1 for i in pre_idx)
+    out["pre_low_date"] = iso(dates[min(pre_idx, key=lambda i: closes[i])])
+    for n in (3, 7, 14, 30):
+        j = a_i + n - 1
+        out[f"r{n}"] = closes[j] / pre - 1 if j < len(closes) else None
+    for tag, level in (("react10", 0.1), ("react20", 0.2)):
+        j = next((j for j in range(a_i, len(closes)) if closes[j] >= pre * (1 + level)), None)
+        out[tag] = (dates[j] - anchor).days if j is not None else None
+    peak_i = max(range(a_i, len(closes)), key=lambda i: closes[i])
+    out.update(peak_date=iso(dates[peak_i]), peak_ret=closes[peak_i] / pre - 1, days_to_peak=(dates[peak_i] - anchor).days,
+               dd_now=closes[-1] / closes[peak_i] - 1, now_ret=closes[-1] / pre - 1)
+    for period in (200, 365):
+        ma = mas[period][a_i - 1]
+        out[f"above{period}_pre"] = None if ma is None else pre > ma
+    wi = max((i for i, d in enumerate(wd) if d < anchor), default=None)
+    out["macd_w_pre"] = None if wi is None else {"dif_above_zero": wdif[wi] > 0, "hist_up": wi > 0 and whist[wi] > whist[wi - 1]}
+    return out
+
+
+LEAD_PP = 0.10   # 锚点前收益比 BTC 高出 10 个百分点算“先行”
+
+
+def classify(ranked, btc):
+    """先行 = 锚点前跑赢 BTC ≥ 10 个百分点；续强 = 锚点后 30 天收益不低于 BTC。"""
+    b = (btc or {}).get("anchor")
+    for c in ranked:
+        a = c.get("anchor")
+        if not a or not b or a.get("r30") is None or b.get("r30") is None:
+            c["anchor_class"] = "无法分类"
+            continue
+        lead = a["pre_ret"] - b["pre_ret"] >= LEAD_PP
+        strong = a["r30"] >= b["r30"]
+        c["anchor_class"] = ("龙头（先行且续强）" if lead and strong else "先行后掉队" if lead else "后发跟涨" if strong else "落后")
 
 
 def structure(res):
@@ -385,6 +434,39 @@ def launch_queue(ranked, btc, end=None):
     return started, late, waiting
 
 
+def anchor_section(meta, ranked, btc):
+    if not meta.get("anchor"):
+        return "", []
+    live = [c for c in ranked if c.get("anchor")]
+    b = (btc or {}).get("anchor")
+    if not live or not b:
+        return "", []
+    order = ["龙头（先行且续强）", "先行后掉队", "后发跟涨", "落后", "无法分类"]
+    groups = {k: [c for c in live if c["anchor_class"] == k] for k in order}
+    lines = [f"以 {meta['anchor']} 为锚点：BTC 锚点前（{meta['start']}→前一天）{pc(b['pre_ret'])}；锚点后 7 天 {pc(b['r7'])}、30 天 {pc(b['r30'])}；高点 {dt(b['peak_date'])}（比锚点前一天高 {pc(b['peak_ret'], 0)}），现在距高点 {pc(b['dd_now'], 0)}。",
+             "分类（先行 = 锚点前收益比 BTC 高 10 个百分点以上；续强 = 锚点后 30 天收益不低于 BTC）："
+             + "；".join(f"{k} {len(v)} 个" for k, v in groups.items() if v) + "。"]
+    def row(c):
+        a = c["anchor"]
+        z = a["macd_w_pre"]
+        return [c["symbol"], c["anchor_class"].split("（")[0], c.get("cg_rank") or "—", pc(a["pre_ret"], 0), pc(a["pre_ret"] - b["pre_ret"], 0), pc(a["pre_max_rally"], 0),
+                yn(a["above200_pre"]), yn(a["above365_pre"]), "—" if not z else ("零轴上" if z["dif_above_zero"] else "零轴下") + ("·回升" if z["hist_up"] else "·走弱"),
+                pc(a["r3"], 0), pc(a["r7"], 0), pc(a["r14"], 0), pc(a["r30"], 0),
+                "—" if a["react20"] is None else f"{a['react20']}天", dt(a["peak_date"]), pc(a["peak_ret"], 0), pc(a["dd_now"], 0), "低活跃" if c["low_activity"] else "正常"]
+    heads = ["币", "类别", "市值榜名次", "锚点前收益", "相对BTC", "锚点前最大反弹", "锚点前在MA200上", "锚点前在MA365上", "锚点前周线MACD", "锚点后3天", "7天", "14天", "30天",
+             "涨20%用时", "锚点后高点日", "锚点→高点", "高点至今", "活跃度"]
+    ordered = sorted(live, key=lambda c: (order.index(c["anchor_class"]), -c["anchor"]["pre_ret"]))
+    quick = table(["币", "类别", "锚点前收益", "锚点后30天", "涨20%用时", "高点日", "高点至今"],
+                  [[c["symbol"], c["anchor_class"].split("（")[0], pc(c["anchor"]["pre_ret"], 0), pc(c["anchor"]["r30"], 0),
+                    "—" if c["anchor"]["react20"] is None else f"{c['anchor']['react20']}天", dt(c["anchor"]["peak_date"]), pc(c["anchor"]["dd_now"], 0)]
+                   for c in ordered if c["anchor_class"].startswith("龙头")])
+    html_ = (f"<h2>A. 以 {meta['anchor']} 为锚点：谁先行、谁跟涨、谁掉队</h2><p class='note'>锚点前 = {meta['start']} 到锚点前一天，视为日常震荡洗盘阶段；锚点后 = 锚点当天起。"
+             "“涨20%用时”= 锚点后第几天收盘比锚点前一天高 20%，越小反应越快。</p>"
+             f"<h3>龙头（先行且续强，共 {len(groups[order[0]])} 个）</h3>" + (quick if groups[order[0]] else "<p class='note'>无。</p>") +
+             "<h3>全部币明细（按类别、锚点前收益排序）</h3>" + table(heads, [row(c) for c in ordered]))
+    return html_, lines
+
+
 def build_html(meta, ranked, skipped, btc):
     start, end = date.fromisoformat(meta["start"]), date.fromisoformat(meta["end"])
     by_start = sorted([c for c in ranked if c["w50"]], key=lambda c: (c["w50"], c["symbol"]))
@@ -395,11 +477,13 @@ def build_html(meta, ranked, skipped, btc):
     batch = lambda cs: "、".join(c["symbol"] for c in cs) or "—"
     third = max(1, len(by_start) // 3)
     top = ranked[:5]
+    anchor_html, anchor_lines = anchor_section(meta, ranked, btc)
     summary = [
         f"区间 {start} → {end}（UTC 日线，基准 = {start} 前一天收盘），分析 {n} 个币" + (f"，另有 {len(skipped)} 个因数据不足未纳入" if skipped else "") + "。",
         f"BTC 区间收益 {pc(btc['ret_end']) if btc else '—'}；站上 MA200 的币：起点 {above_base}/{n} → 现在 {above_now}/{n}。",
         f"主升浪启动（区间低点后首次 +50%）先后：最先 {batch(by_start[:third])}；中段 {batch(by_start[third:2 * third])}；最后 {batch(by_start[2 * third:])}"
         + (f"；到现在没涨到 +50%：{'、'.join(never)}" if never else "") + "。",
+        *anchor_lines,
         *bucket_lines(ranked),
         *activity_lines(ranked, meta["min_turnover"]),
         "综合分前 5（按下表公式，只是排序，不是买卖建议）：" + "、".join(f"{c['symbol']}({c['composite']:.2f})" for c in top) + "。",
@@ -470,7 +554,7 @@ def build_html(meta, ranked, skipped, btc):
             f"<title>龙头与轮动研究 {start}~{end}</title><style>{css}</style></head><body>"
             f"<h1>龙头与轮动研究：{start} → {end}</h1><p class='note'>生成于 {meta['generated']}（北京时间） · 数据到 {meta['last_bar']}</p>"
             "<h2>摘要</h2><ul>" + "".join(f"<li>{html.escape(s)}</li>" for s in summary) + "</ul>" +
-            queue_html + "<h2>1. 先涨后涨：全部币的明细</h2>" + t1 +
+            anchor_html + queue_html + "<h2>1. 先涨后涨：全部币的明细</h2>" + t1 +
             "<h2>2. 区间走势（周收盘，基准日 = 100；虚线 = BTC，竖线 = 区间起止）</h2>" + chart([c for c in top if c is not btc], btc, start, end) +
             "<p class='note'>图里画的是综合分前 5 名和 BTC。</p>"
             "<h2>3. 200 日 / 365 日均线：谁先站上</h2>" + t2 +
@@ -481,7 +565,7 @@ def build_html(meta, ranked, skipped, btc):
 
 
 # ---------- 主流程 ----------
-def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None, min_turnover=5e6):
+def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None, min_turnover=5e6, anchor=None):
     now = now or datetime.now(timezone.utc)
     warnings = []
     bases = perp_bases(getter)
@@ -502,7 +586,7 @@ def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None, min_turn
         if len(bars) < 230:
             skipped.append({"symbol": cand["symbol"], "skipped": f"日线只有 {len(bars)} 根，不够算 MA200"})
             continue
-        result = analyze(cand["symbol"], bars, start, end, min_turnover)
+        result = analyze(cand["symbol"], bars, start, end, min_turnover, anchor)
         if "skipped" in result:
             skipped.append(result)
             continue
@@ -514,10 +598,12 @@ def run(start, end, top_n, out_dir, getter=monitor.http_json, now=None, min_turn
         raise RuntimeError("没有任何币分析成功：" + "；".join(f"{s['symbol']}:{s['skipped']}" for s in skipped[:5]))
     ranked = rank_all(coins)
     btc = next((c for c in ranked if c["symbol"] == "BTC"), None)
+    if anchor:
+        classify(ranked, btc)
     if not btc:
         warnings.append("名单里没有 BTC，相对 BTC 一列为空")
     kind = "CoinGecko 市值榜（取数时的当前排名）" if all(c.get("cg_rank") for c in ranked) else "币安 24h 成交额排序"
-    meta = {"start": start.isoformat(), "end": end.isoformat(), "top_n": top_n, "min_turnover": min_turnover, "generated": (now + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
+    meta = {"start": start.isoformat(), "end": end.isoformat(), "top_n": top_n, "min_turnover": min_turnover, "anchor": anchor.isoformat() if anchor else None, "generated": (now + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M"),
             "last_bar": max(c["last_date"] for c in ranked), "warnings": warnings,
             "universe_note": f"{kind}前 {len(ranked)} 个、币安有 USDT 永续合约，已剔除稳定币/包装币/黄金币；" + "；".join(
                 f"{s['symbol']} 未纳入（{s['skipped']}）" for s in skipped) if skipped else f"{kind}前 {len(ranked)} 个、币安有 USDT 永续合约，已剔除稳定币/包装币/黄金币"}
@@ -533,10 +619,11 @@ def main(argv):
     parser.add_argument("--out", required=True)
     parser.add_argument("--top", type=int, default=200)
     parser.add_argument("--min-turnover", type=float, default=5e6, help="日成交额低于这个数（美元）算低活跃")
+    parser.add_argument("--anchor", default="2026-08-19", help="锚点日：BTC 大幅拉升、确认小周期行情的那天；传空串则不做锚点分析")
     parser.add_argument("--start", default="2026-07-01")
     parser.add_argument("--end", default="2026-10-31")
     args = parser.parse_args(argv)
-    meta, ranked = run(date.fromisoformat(args.start), date.fromisoformat(args.end), args.top, args.out, min_turnover=args.min_turnover)
+    meta, ranked = run(date.fromisoformat(args.start), date.fromisoformat(args.end), args.top, args.out, min_turnover=args.min_turnover, anchor=date.fromisoformat(args.anchor) if args.anchor else None)
     print(f"完成：{len(ranked)} 个币，综合分前 5：" + "、".join(c["symbol"] for c in ranked[:5]))
     return 0
 
