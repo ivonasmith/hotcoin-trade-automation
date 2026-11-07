@@ -275,6 +275,21 @@ class ThrottleTest(unittest.TestCase):
         self.assertIn("暂存后补发", c.sent[-1])
         self.assertIn("SOL 价格涨到 110", c.sent[-1])
 
+    def test_qualified_paper_alert_is_exempt_from_cap_and_coin_gap(self):
+        state = autowatch.new_state()
+        state.update(sent_today=12, day=autowatch.alert_day(ms(bj(2026, 11, 9, 12, 0))), coin_last={"SOL": ms(bj(2026, 11, 9, 11, 50))})
+        now = ms(bj(2026, 11, 9, 12, 0))
+        mkitem = lambda sym, cls: {"key": sym, "sym": sym, "kind": "down", "src": "level", "ledger": False, "tag": "", "note": "",  # noqa: E731
+                                   "text": f"{sym} 价格跌到 100", "ts": now, "paper": {"cls": cls, "lines": ["  📒 x"]}}
+        sent = []
+        summary = {"errors": [], "sent": 0}
+        autowatch.deliver({"coins": {}}, state, [mkitem("SOL", "paper"), mkitem("ETH", "shadow")], sent.append, now,
+                          {**autowatch.DEFAULTS, "cap": 12, "quiet": None}, summary)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("SOL 价格跌到", sent[0])
+        self.assertNotIn("ETH 价格跌到", sent[0])
+        self.assertEqual(state["suppressed_today"], 1)
+
     def test_daily_cap_blocks_normal_alerts_once_with_notice_but_lets_ledger_through(self):
         syms = ["SOL", "ETH", "BNB"]
         c = Cycle(plan_of([mk(s, "up", 105) for s in syms] + [mk("XRP", "up", 105, src="ledger", tag="止损价", note="台账：y")]),

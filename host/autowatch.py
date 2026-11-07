@@ -269,6 +269,11 @@ def deliver(plan, state, new_items, notify, now_ms, settings, summary):
         if quiet:
             keep.append(item)
             continue
+        if (item.get("paper") or {}).get("cls") == "paper":   # 过了闸门、开了纸面单的机会：不受每日上限和同币间隔限制，不能被噪音挤掉
+            send.append(item)
+            opened.add(item["sym"])
+            planned += 1
+            continue
         last = state["coin_last"].get(item["sym"])
         if item["sym"] not in opened and last is not None and now_ms - last < COIN_GAP_MS:
             keep.append(item)
