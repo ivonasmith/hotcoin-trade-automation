@@ -57,7 +57,7 @@ def fetch_daily(contract, getter, limit=1500):
     last = None
     for base in monitor.FAPI_BASES:
         try:
-            rows = getter(f"{base}/fapi/v1/klines?" + urllib.parse.urlencode({"symbol": contract, "interval": "1d", "limit": limit}))
+            rows = getter(f"{base}/fapi/v1/klines?" + urllib.parse.urlencode({"symbol": contract + "USDT", "interval": "1d", "limit": limit}))
             bars = monitor.parse_klines(rows)
             for bar, row in zip(bars, rows):
                 bar["qv"] = float(row[7]) if len(row) > 7 else None   # 当天成交额（USDT）
