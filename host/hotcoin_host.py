@@ -393,7 +393,8 @@ class Host:
                 self.auto_state = autowatch.load_state(AUTO_STATE_FILE)
             if self.paper is None:
                 import paper as paper_module
-                self.paper = paper_module.Paper(PAPER_FILE)
+                import gates
+                self.paper = paper_module.Paper(PAPER_FILE, gates=gates.Gates(monitor.http_json))
             plan = self.current_plan()
             settings = autowatch.settings_from_env(self.env)
             auto = autowatch.run_auto_cycle(plan, self.auto_state, lambda text: notify(self.env, text),
@@ -458,7 +459,7 @@ def main(argv):
         import paper as paper_module
         state = autowatch.load_state(AUTO_STATE_FILE)
         auto = autowatch.run_auto_cycle(fetch_plan(env), state, lambda text: notify(env, text), getter=monitor.http_json,
-                                        settings=autowatch.settings_from_env(env), paper=paper_module.Paper(PAPER_FILE))
+                                        settings=autowatch.settings_from_env(env), paper=paper_module.Paper(PAPER_FILE, gates=__import__("gates").Gates(monitor.http_json)))
         autowatch.save_state(state, AUTO_STATE_FILE)
         print(json.dumps(auto, ensure_ascii=False))
         return 0

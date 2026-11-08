@@ -169,7 +169,8 @@ def risk_state(state, now_ms):
 
 # ---------- 账本 ----------
 class Paper:
-    def __init__(self, path, rules=None):
+    def __init__(self, path, rules=None, gates=None):
+        self.gates = gates   # host/gates.Gates：宏观闸门和事件窗口；None 时卡片里原样写“未核对”
         self.path = Path(path)
         self.state = load_state(self.path)
         self.rules = {**DEFAULT_RULES, **(rules or {})}
@@ -190,7 +191,7 @@ class Paper:
         lines = []
         if touch and card:
             rules = {**self.rules, **((plan or {}).get("paper") or {})}
-            trade, lines = self.open_trade(alert, card, item, now_ms, rules)
+            trade, lines = self.open_trade(alert, card, item, now_ms, rules, plan)
             alert["cls"] = "paper" if trade["paper"] else "shadow"
             alert["trade_id"] = trade["id"]
         elif item.get("src") == "ledger":
@@ -210,13 +211,20 @@ class Paper:
         except Exception:  # noqa: BLE001
             return None
 
-    def open_trade(self, alert, card, item, now_ms, rules):
+    def open_trade(self, alert, card, item, now_ms, rules, item_plan=None):
         state = self.state
         sym, side = card["sym"], card["side"]
         blocks = list(card.get("blocks") or [])
         size, notional = card["size"], card["notional_usd"]
         notes = []
-        if card["qualified"]:
+        gate = None
+        if self.gates is not None:
+            try:
+                gate = self.gates.check(item_plan, card, now_ms)
+            except Exception as exc:  # noqa: BLE001
+                gate = {"blocks": [], "passes": [], "unchecked": [f"闸门核对出错：{str(exc)[:60]}"]}
+            blocks.extend(gate["blocks"])
+        if card["qualified"] and not (gate and gate["blocks"]):
             risk = risk_state(state, now_ms)
             open_paper = [t for t in state["trades"] if t["paper"] and t["status"] == "open"]
             if risk["halted"]:
@@ -243,15 +251,15 @@ class Paper:
                  "paper": paper, "entry": card["entry"], "stop0": card["stop"], "target": card["target"],
                  "r2": card["r2"], "r3": card["r3"], "stop_pct": stop_pct, "size": round(size, 4),
                  "notional_usd": notional_usd, "margin_usd": round(notional_usd / rules["leverage"]),
-                 "risk_usd": round(notional_usd * stop_pct / 100, 2), "blocks": blocks, "passes": card.get("passes") or [],
+                 "risk_usd": round(notional_usd * stop_pct / 100, 2), "blocks": blocks, "passes": (card.get("passes") or []) + (gate["passes"] if gate else []),
                  "stop_now": card["stop"], "stage": 0, "status": "open", "exit": None, "r": None, "pnl_usd": None,
                  "mfe_r": 0, "mae_r": 0, "level": card.get("level")}
         state["next_id"] += 1
         state["trades"].append(trade)
-        return trade, self.card_lines(trade, card, notes, rules)
+        return trade, self.card_lines(trade, card, notes, rules, gate)
 
     # --- 文字 ---
-    def card_lines(self, trade, card, notes, rules):
+    def card_lines(self, trade, card, notes, rules, gate=None):
         long = trade["side"] == "多"
         head = (f"纸面单 #{trade['id']} {trade['sym']} 做{trade['side']}｜已开（纸面，限价成交）" if trade["paper"]
                 else f"不开纸面单（观察）：{trade['sym']} 若做{trade['side']}")
@@ -273,8 +281,9 @@ class Paper:
             open_paper = [t for t in self.state["trades"] if t["paper"] and t["status"] == "open"]
             total = sum(t["notional_usd"] for t in open_paper)
             lines.append(f"  组合：纸面持仓 {len(open_paper)} 张，名义 {fmt_usd(total)}/{fmt_usd(rules['max_notional_usd'])}")
-        if card.get("unchecked"):
-            lines.append("  未核对（需你确认，程序读不到）：" + "；".join(u.split('（')[0] for u in card["unchecked"]))
+        unchecked = gate["unchecked"] if gate else (card.get("unchecked") or [])
+        if unchecked:
+            lines.append("  未核对（程序读不到，需你留意）：" + "；".join(u.split('（')[0] if gate is None else u for u in unchecked))
         return lines
 
     # --- 每轮：更新、通知、复盘 ---

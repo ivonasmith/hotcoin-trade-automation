@@ -52,7 +52,7 @@ function sizing(card,direction,levelMult,macro,long) {
 function base(sym,side,level,m) {
   return {key:cardKey(sym,side==='多'?'down':'up',level.mid),sym,side,entry:level.mid,
     level:{segs:level.segs??null,days:level.days??null,age:level.age??null,gap:level.gap??null,dist:level.dist??null},
-    qualified:false,blocks:[],passes:[],unchecked:UNCHECKED};
+    atr_d_pct:num(m.atr_d_pct),qualified:false,blocks:[],passes:[],unchecked:UNCHECKED};
 }
 function finish(card,long,m,macro,levelMult,direction) {
   const {stop,target,r2,r3,stopPct}=stopTarget(card.entry,m.atr_d_pct,long);
@@ -115,6 +115,9 @@ function shortCard(sym,level,m,macro,screen) {
 export function buildCards(snapshot) {
   const summary=snapshot?.summary||{},metrics=summary['指标']||{},screens=summary['做空筛选']||{};
   const macro=macroView(summary),cards={};
+  const facts=snapshot?.poster_facts;   // 涨腿起点是规则状态，天数/回撤由每日取数按日线收盘算好；主机每天按起点重算天数
+  macro.leg=facts?.ok===true && facts.leg?.start && num(facts.leg.dd)!==null
+    ?{ok:true,start:facts.leg.start,day:facts.leg.day,dd:facts.leg.dd,peak_pct:num(facts.leg.peak_pct)}:{ok:false};
   for(const sym of TRADABLE) {
     const m=metrics[sym];
     if(!m) continue;

@@ -121,3 +121,12 @@ test('慢档不可用的币不出卡',()=>{
   const {cards}=buildCards(snap(only('SOL',metric(100,{'慢档可用':false}))));
   assert.deepEqual(Object.keys(cards),[]);
 });
+
+test('涨腿数据和 ATR 随卡片/计划带给主机，主机据此核对闸门',()=>{
+  const snapshot={...snap(only('SOL',metric(100))),poster_facts:{ok:true,leg:{day:131,start:'2026-06-30',dd:6.9,peak_pct:47.8}}};
+  const {cards,macro}=buildCards(snapshot);
+  assert.deepEqual(macro.leg,{ok:true,start:'2026-06-30',day:131,dd:6.9,peak_pct:47.8});
+  assert.equal(cards[cardKey('SOL','down',95)].atr_d_pct,4);
+  assert.deepEqual(buildCards(snap(only('SOL',metric(100)))).macro.leg,{ok:false});
+  assert.deepEqual(buildCards({...snap(only('SOL',metric(100))),poster_facts:{ok:false,error:'x'}}).macro.leg,{ok:false});
+});
