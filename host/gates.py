@@ -13,7 +13,7 @@ import monitor
 
 CAL_URLS = ["https://uncleonchain.com/data/cal/cal_latest.json",
             "https://raw.githubusercontent.com/ivonasmith/uncleonchain/main/site/data/cal/cal_latest.json"]
-BINARY_TYPES = {"FOMC", "CPI", "NFP"}
+BINARY_TYPES = {"FOMC", "CPI", "NFP", "REG", "VOTE"}   # REG/VOTE = 监管或立法的二元投票
 VOTE_WORDS = ("投票", "表决", "vote")
 HOUR = 3600000
 DAY = 86400000

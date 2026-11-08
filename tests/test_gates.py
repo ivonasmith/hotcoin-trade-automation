@@ -51,6 +51,7 @@ class ParseTest(unittest.TestCase):
     def test_only_binary_events_kept(self):
         self.assertIsNotNone(gates.parse_event(ev("FOMC", "2026-11-10 19:00")))
         self.assertIsNotNone(gates.parse_event({"type": "未检验", "date": "2026-11-10", "title_zh": "国会法案投票"}))
+        self.assertIsNotNone(gates.parse_event({"type": "REG", "date": "2026-11-10", "title_zh": "参议院市场结构法案终审"}))
         self.assertIsNone(gates.parse_event({"type": "未检验", "date": "2026-11-10", "title_zh": "某代币解锁"}))
         self.assertIsNone(gates.parse_event({"type": "FOMC", "date": "bad"}))
 
