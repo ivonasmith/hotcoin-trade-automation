@@ -1,6 +1,7 @@
 import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
 import {boardText} from './board.mjs';
+import {grokHotspots} from './grok.mjs';
 import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {Flow,tgErrorReason} from './flow.mjs';
@@ -505,6 +506,14 @@ export class TradeDesk {
         await this.ctx.storage.put('plan:current',plan);
         planRules=plan.rules.length;
       } catch { /* 计划生成失败不影响快照上传；主机沿用旧计划直到过期 */ }
+      // 工作日晚间首次快照到达（北京时间19:00-21:00），且今天没人贴热点：自动取热点出送审稿，等你审核。
+      try {
+        const hour=new Date(Date.now()+8*3600000).getUTCHours();
+        if(env.AUTO_DRAFT==='true' && env.TELEGRAM_OWNER_ID && eligible(day).ok && hour>=19 && hour<21
+          && !await this.ctx.storage.get('hotspots:'+day) && !await this.ctx.storage.get('draft:'+day)) {
+          await this.autoStart(env.TELEGRAM_OWNER_ID,env);
+        }
+      } catch { /* 自动出稿失败不影响快照上传；可手动发 /auto */ }
       return json({ok:true,day,received_at:Date.now(),plan_rules:planRules});
     }
     if(path==='/pipeline/weekly' && request.method==='POST') {
@@ -545,7 +554,7 @@ export class TradeDesk {
         const raw=await request.text();
         if(raw.length>20000) return json({ok:false},413);
         const form=new URLSearchParams(raw),config={};
-        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','GEMINI_MODEL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','CUSTOM_AI_BASE_URL','CUSTOM_AI_API_KEY','CUSTOM_AI_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER','GITHUB_DISPATCH_TOKEN','GITHUB_REPO']) {
+        for(const name of ['X_CLIENT_ID','X_CLIENT_SECRET','TELEGRAM_BOT_TOKEN','TELEGRAM_OWNER_ID','GEMINI_API_KEY','GEMINI_MODEL','ANTHROPIC_API_KEY','ANTHROPIC_MODEL','APINEBULA_API_KEY','APINEBULA_MODEL','XAI_API_KEY','XAI_MODEL','CUSTOM_AI_BASE_URL','CUSTOM_AI_API_KEY','CUSTOM_AI_MODEL','BEDROCK_API_KEY','BEDROCK_REGION','BEDROCK_MODEL','AI_PROVIDER','GITHUB_DISPATCH_TOKEN','GITHUB_REPO']) {
           const value=form.get(name)?.trim();
           if(value) {
             if(value.length>2000 || /[\r\n]/.test(value)) return json({ok:false,error:'字段格式有误'},400);
@@ -555,6 +564,7 @@ export class TradeDesk {
             if(name==='BEDROCK_REGION' && !/^[a-z]{2}-[a-z]+-\d$/.test(value)) return json({ok:false,error:'Bedrock区域格式有误，例如 us-east-2'},400);
             if(name==='BEDROCK_MODEL' && !/^[a-zA-Z0-9._:-]+$/.test(value)) return json({ok:false,error:'Bedrock模型编号格式有误'},400);
             if(name==='GITHUB_REPO' && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return json({ok:false,error:'仓库名格式应为 owner/repo'},400);
+            if(name==='XAI_MODEL' && !/^[a-zA-Z0-9._-]+$/.test(value)) return json({ok:false,error:'xAI模型名格式有误'},400);
             if(name==='GEMINI_MODEL' && !/^[a-zA-Z0-9._-]+$/.test(value)) return json({ok:false,error:'Gemini模型名格式有误'},400);
             if(name==='CUSTOM_AI_BASE_URL' && !customUrl(value)) return json({ok:false,error:'接口地址须是 https://… 开头（例如 https://xxx.com/v1）'},400);
             if(name==='CUSTOM_AI_MODEL' && !/^[a-zA-Z0-9._:/-]+$/.test(value)) return json({ok:false,error:'模型名格式有误'},400);
@@ -657,13 +667,15 @@ export class TradeDesk {
       ['CUSTOM_AI_BASE_URL','第三方备用平台：接口地址（OpenAI兼容，形如 https://xxx.com/v1）','text'],
       ['CUSTOM_AI_API_KEY','第三方备用平台：API密钥','password'],
       ['CUSTOM_AI_MODEL','第三方备用平台：模型名（如 claude-sonnet-4-6，以平台模型广场为准）','text'],
+      ['XAI_API_KEY','xAI（Grok）API密钥：自动取每日热点','password'],
+      ['XAI_MODEL','xAI模型名（默认 grok-4.7）','text'],
       ['APINEBULA_API_KEY','ApiNebula API令牌','password'],
       ['APINEBULA_MODEL','ApiNebula模型名（按模型广场填写）','text']]
       .map(([name,label,type])=>`<p><label>${label}<br><input style="width:95%;font:inherit;padding:8px" name="${name}" type="${type}" autocomplete="off" placeholder="${env[name]?'已保存；留空保持':'待填写'}"></label></p>`).join('');
     const selected=env.AI_PROVIDER||'anthropic';
     const providerName={anthropic:'Claude官方',bedrock:'亚马逊Bedrock',apinebula:'ApiNebula',gemini:'Gemini',custom:'第三方备用平台'}[selected];
     const providerField=`<p><label>首选撰稿模型<br><select style="width:98%;font:inherit;padding:8px" name="AI_PROVIDER"><option value="apinebula" ${selected==='apinebula'?'selected':''}>ApiNebula（Claude兼容）</option><option value="custom" ${selected==='custom'?'selected':''}>第三方备用平台（OpenAI兼容）</option><option value="anthropic" ${selected==='anthropic'?'selected':''}>Claude官方</option><option value="bedrock" ${selected==='bedrock'?'selected':''}>亚马逊Bedrock</option><option value="gemini" ${selected==='gemini'?'selected':''}>Gemini</option></select></label></p>`;
-    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||DEFAULT_MODEL)}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||DEFAULT_MODEL)}</li><li>亚马逊Bedrock：${env.BEDROCK_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.BEDROCK_REGION||'us-east-2')} · ${escapeHTML(env.BEDROCK_MODEL||BEDROCK_MODEL)}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/bedrock/check">${hidden}<button ${env.BEDROCK_API_KEY?'':'disabled'}>检查Bedrock连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
+    return page('热币交易 · 后台设置',`<p>运行模式：<b>${env.RUN_MODE==='live'?'正式环境':'测试环境'}</b>；发布总开关：<b>${env.PUBLISH_ENABLED==='true'?'已开启':'待端到端验证后开启'}</b></p><ul><li>X应用配置：${ready?'已填写':'待填写 X_CLIENT_ID、X_CLIENT_SECRET'}</li><li>X账号：${account?escapeHTML('@'+account.username):'未授权'}</li><li>Telegram Token：${env.TELEGRAM_BOT_TOKEN?'已填写':'待填写'}</li><li>Telegram审核人：${env.TELEGRAM_OWNER_ID?'已指定':'待指定'}</li><li>首选撰稿模型：${providerName}</li><li>ApiNebula：${env.APINEBULA_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.APINEBULA_MODEL||DEFAULT_MODEL)}</li><li>Claude官方 API：${env.ANTHROPIC_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.ANTHROPIC_MODEL||DEFAULT_MODEL)}</li><li>亚马逊Bedrock：${env.BEDROCK_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.BEDROCK_REGION||'us-east-2')} · ${escapeHTML(env.BEDROCK_MODEL||BEDROCK_MODEL)}</li><li>Gemini API：${env.GEMINI_API_KEY?'已填写':'待填写'}</li><li>xAI（Grok）热点：${env.XAI_API_KEY?'已填写':'待填写'} · ${escapeHTML(env.XAI_MODEL||'grok-4.7')} · 自动出稿：${env.AUTO_DRAFT==='true'?'开':'关'}</li><li>今日：${escapeHTML(beijingDay())} · ${escapeHTML(eligible(beijingDay()).reason)}</li></ul><p>Callback URL：<code>${escapeHTML(url.origin+'/oauth/x/callback')}</code></p><h2>填写应用凭据</h2><p>只存入你自己的Cloudflare后台，保存后不回显。留空保留原值。</p><form method="post" action="/admin/config">${hidden}${providerField}${fields}<button>加密保存</button></form><h2>连接账号</h2><form method="post" action="/admin/x/connect">${hidden}<button ${ready?'':'disabled'}>授权 @Uncle_Onchain</button></form><p></p><form method="post" action="/admin/telegram/connect">${hidden}<button ${env.TELEGRAM_BOT_TOKEN?'':'disabled'}>接通Telegram机器人</button></form><p></p><form method="post" action="/admin/apinebula/check">${hidden}<button ${env.APINEBULA_API_KEY?'':'disabled'}>检查ApiNebula连接</button></form><p></p><form method="post" action="/admin/anthropic/check">${hidden}<button ${env.ANTHROPIC_API_KEY?'':'disabled'}>检查Claude官方连接</button></form><p></p><form method="post" action="/admin/bedrock/check">${hidden}<button ${env.BEDROCK_API_KEY?'':'disabled'}>检查Bedrock连接</button></form><p></p><form method="post" action="/admin/gemini/check">${hidden}<button ${env.GEMINI_API_KEY?'':'disabled'}>检查Gemini连接</button></form>`,200,{'Referrer-Policy':'same-origin'});
   }
   async connect(url,env) {
     if(!env.X_CLIENT_ID || !env.X_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY)
@@ -767,7 +779,7 @@ export class TradeDesk {
     }
     if(actor!==String(env.TELEGRAM_OWNER_ID)) return json({ok:true});
     if(text==='/start') {
-      await reply('发送 /hotspots 后粘贴今日Grok热点（可分多条），最后发送 /done；或直接发送 /auto，按程序算出的异动榜出稿。系统会调用Claude生成送审稿，但不会自动发推。');
+      await reply('发送 /hotspots 后粘贴今日热点（可分多条），最后发送 /done；或直接发送 /auto，自动取 Grok 热点加程序异动榜出稿（工作日19点快照到达后也会自动触发）。系统会调用Claude生成送审稿，但不会自动发推。');
       return json({ok:true});
     }
     if(text==='/status') {
@@ -832,14 +844,7 @@ export class TradeDesk {
       return json({ok:true});
     }
     if(text==='/draft') return this.makeDraft(chat,env);
-    if(text==='/auto') {
-      // No hotspots from the owner: draft from the program's own movers board (numbers only, no narrative).
-      const day=beijingDay(),snap=await this.ctx.storage.get('snapshot:'+day),board=boardText(snap?.summary);
-      if(!board) { await reply('今天的行情快照还没上传，或快照里没有异动榜。取数跑完后再发 /auto。'); return json({ok:true}); }
-      await this.ctx.storage.put('hotspots:'+day,{day,started:Date.now(),parts:[board],submitted:Date.now(),auto:true});
-      await reply('已按程序异动榜出稿（没有 Grok 叙事，正文只陈述数字）：\n\n'+board);
-      return this.makeDraft(chat,env);
-    }
+    if(text==='/auto') return this.autoStart(chat,env);
     let response;
     await this.ctx.storage.transaction(async tx=>{
       if(await tx.get('tg-update:'+update.update_id)) return;
@@ -869,9 +874,15 @@ export class TradeDesk {
     if(text==='/done' && response==='今日热点已保存，正在生成送审稿。') await this.makeDraft(chat,env);
     return json({ok:true});
   }
+  // No hotspots pasted: runDraft fetches them (Grok via xAI when configured) and adds the program's movers board.
+  async autoStart(chat,env) {
+    const day=beijingDay(),saved=await this.ctx.storage.get('hotspots:'+day);
+    await this.ctx.storage.put('hotspots:'+day,{day,started:Date.now(),submitted:Date.now(),parts:saved?.parts||[],auto:true,grok_done:Boolean(saved?.grok_done)});
+    return this.makeDraft(chat,env);
+  }
   async makeDraft(chat,env,force=false) {
     const day=beijingDay(),saved=await this.ctx.storage.get('hotspots:'+day);
-    if(!saved?.parts?.length) {
+    if(!saved?.parts?.length && !saved?.auto) {
       await telegram(env,'sendMessage',{chat_id:chat,text:'今天还没有热点。请先发送 /hotspots，粘贴内容后发送 /done。'});
       return json({ok:true});
     }
@@ -912,8 +923,23 @@ export class TradeDesk {
       promptChars=compact?.chars||0;
       const verified=compact?`\n\n已通过程序新鲜度校验的当日交易快照${compact.trimmed?`（体积已压缩：长列表只保留前${compact.items}项，被省略的内容不得推测）`:''}：\n${compact.body}`:
         '\n\n当日交易快照：尚未上传。禁止生成交易动作。';
+      if(saved.auto && !saved.grok_done) {
+        let note;
+        if(env.XAI_API_KEY) {
+          try {
+            const coins=Object.keys(snapshot?.summary?.['指标']||{});
+            const grok=await grokHotspots(env,day,{coins});
+            saved.parts.push(`Grok联网热点（xAI实时检索X与网页，过去24小时；以下是素材，不是已核实事实）：\n${grok.text}`);
+            note=`已自动取到 Grok 热点（${grok.text.length}字，取回${grok.posts}条帖，约$${grok.estimated_usd}）。`;
+          } catch(error) { note=`Grok热点没取到（${error.message}），这次只用程序异动榜。`; }
+        } else note='没有配置 xAI 密钥，这次只用程序异动榜。';
+        saved.grok_done=true;
+        await this.ctx.storage.put('hotspots:'+day,saved);
+        await telegram(env,'sendMessage',{chat_id:chat,text:note});
+      }
       let hotspots=saved.parts.join('\n\n');
       const board=boardText(snapshot?.summary);
+      if(!hotspots && !board) throw Error('没有热点来源：既没有 Grok 热点，快照里也没有异动榜');
       if(board && !hotspots.includes('程序异动榜')) hotspots+='\n\n'+board;
       const plan=buildOrderPlan(snapshot,day);
       which=draftProvider(env);
