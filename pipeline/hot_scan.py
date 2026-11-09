@@ -5,6 +5,7 @@
 不会拿旧数据顶替，也不会让每日取数失败。
 """
 import os
+import re
 import time
 
 import requests
@@ -23,7 +24,7 @@ FUND_PCT = 0.05       # |单期资金费率| ≥ 此值（%），标"费率偏�
 TOP_N = 8             # 异动榜最多列几个
 KLINE_COINS = 45      # 最多逐个拉日线的币数（按24h成交额从高到低）
 ANNOUNCE_HOURS = 48
-KEYWORDS = ("上线", "上市", "下架", "Will List", "Will Add", "Delist", "Launchpool", "HODLer")
+KEYWORDS = ("下架", "Delist", "Launchpool", "HODLer")  # 新币上线不做交易，不收；只收币池内币种相关的公告
 
 _proxy = os.environ.get("HOTCOIN_HTTP_PROXY")
 PROXIES = {"http": _proxy, "https": _proxy} if _proxy else None
@@ -56,6 +57,11 @@ def _num(value):
     except (TypeError, ValueError):
         return None
     return out if out == out and abs(out) != float("inf") else None
+
+
+def _mentions(title, universe):
+    words = set(re.findall(r"[A-Z0-9]{2,10}", title.upper()))
+    return bool(words & universe)
 
 
 def tags_for(change, mult, funding):
@@ -150,7 +156,7 @@ def scan(summary, fetch=http_json, now=None):
         for art in articles:
             title, released = str(art.get("title", "")), _num(art.get("releaseDate"))
             if released and now * 1000 - released <= ANNOUNCE_HOURS * 3600 * 1000 \
-                    and any(k in title for k in KEYWORDS):
+                    and any(k in title for k in KEYWORDS) and _mentions(title, universe):
                 notices.append(title[:90])
     except Exception as exc:  # noqa: BLE001
         gaps.append("币安公告取不到：" + type(exc).__name__)
