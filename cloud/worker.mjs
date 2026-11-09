@@ -1,5 +1,6 @@
 import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
+import {boardText} from './board.mjs';
 import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {Flow,tgErrorReason} from './flow.mjs';
@@ -766,7 +767,7 @@ export class TradeDesk {
     }
     if(actor!==String(env.TELEGRAM_OWNER_ID)) return json({ok:true});
     if(text==='/start') {
-      await reply('发送 /hotspots 后粘贴今日Grok热点（可分多条），最后发送 /done。系统会调用Claude生成送审稿，但不会自动发推。');
+      await reply('发送 /hotspots 后粘贴今日Grok热点（可分多条），最后发送 /done；或直接发送 /auto，按程序算出的异动榜出稿。系统会调用Claude生成送审稿，但不会自动发推。');
       return json({ok:true});
     }
     if(text==='/status') {
@@ -831,6 +832,14 @@ export class TradeDesk {
       return json({ok:true});
     }
     if(text==='/draft') return this.makeDraft(chat,env);
+    if(text==='/auto') {
+      // No hotspots from the owner: draft from the program's own movers board (numbers only, no narrative).
+      const day=beijingDay(),snap=await this.ctx.storage.get('snapshot:'+day),board=boardText(snap?.summary);
+      if(!board) { await reply('今天的行情快照还没上传，或快照里没有异动榜。取数跑完后再发 /auto。'); return json({ok:true}); }
+      await this.ctx.storage.put('hotspots:'+day,{day,started:Date.now(),parts:[board],submitted:Date.now(),auto:true});
+      await reply('已按程序异动榜出稿（没有 Grok 叙事，正文只陈述数字）：\n\n'+board);
+      return this.makeDraft(chat,env);
+    }
     let response;
     await this.ctx.storage.transaction(async tx=>{
       if(await tx.get('tg-update:'+update.update_id)) return;
@@ -851,7 +860,7 @@ export class TradeDesk {
         response='今日热点已保存，正在生成送审稿。';return;
       }
       if(!text) {response='当前请粘贴文字；文件接收稍后接入。';return;}
-      if(text.startsWith('/')) {response='可用命令：/hotspots、/done、/cancel。';return;}
+      if(text.startsWith('/')) {response='可用命令：/hotspots、/done、/cancel、/auto。';return;}
       if(working.parts.join('').length+text.length>50000) {response='内容超过5万字，请精简后重新提交。';return;}
       working.parts.push(text); await tx.put(key,working);
       response=`已收到第${working.parts.length}段；发完请发送 /done。`;
@@ -903,7 +912,9 @@ export class TradeDesk {
       promptChars=compact?.chars||0;
       const verified=compact?`\n\n已通过程序新鲜度校验的当日交易快照${compact.trimmed?`（体积已压缩：长列表只保留前${compact.items}项，被省略的内容不得推测）`:''}：\n${compact.body}`:
         '\n\n当日交易快照：尚未上传。禁止生成交易动作。';
-      const hotspots=saved.parts.join('\n\n');
+      let hotspots=saved.parts.join('\n\n');
+      const board=boardText(snapshot?.summary);
+      if(board && !hotspots.includes('程序异动榜')) hotspots+='\n\n'+board;
       const plan=buildOrderPlan(snapshot,day);
       which=draftProvider(env);
       const input=hotspots+verified+'\n\n'+orderBlock(plan); // 战绩不再喂给撰稿（2026-10-28：老读者看图，正文不播报）

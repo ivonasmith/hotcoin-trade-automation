@@ -41,7 +41,7 @@
 
 X应用凭据保存之后，点击“授权 @Uncle_Onchain”完成账号授权；Telegram Token保存之后，点击“接通Telegram机器人”注册Webhook。
 
-Telegram文字热点流程：`/hotspots` → 粘贴一段或多段文字 → `/done`。保存素材不会触发发布。仅允许配置的审核人ID提交素材。
+Telegram文字热点流程：`/hotspots` → 粘贴一段或多段文字 → `/done`；不想贴热点就发 `/auto`，按取数时程序算出的「市场异动榜」（`pipeline/hot_scan.py`：24h涨跌、放量倍数、费率极端、币安公告、CoinGecko热搜，免费，只陈述数字不解释原因）出稿。异动榜也会附在普通出稿的素材里。保存素材不会触发发布。仅允许配置的审核人ID提交素材。
 
 ## 还未接入
 

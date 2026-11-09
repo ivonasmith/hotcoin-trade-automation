@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import hot_scan  # noqa: E402
 CORE = {"BTC", "ETH", "SOL", "XRP", "BNB"}
 
 
@@ -68,6 +70,12 @@ def run(output, extra):
             for name in ["每日汇总.json", "送审稿四行.txt"]:
                 if (work / name).exists():
                     shutil.copy2(work / name, attempt / name)
+            # 异动榜失败只记缺口，绝不拖垮每日取数
+            try:
+                summary["市场异动"] = hot_scan.scan(summary)
+            except Exception as exc:  # noqa: BLE001
+                summary["市场异动"] = {"异动": [], "缺口": ["异动榜整体失败：" + type(exc).__name__]}
+            (attempt / "每日汇总.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
             report.update({"ok": True, "started_at": started,
                            "finished_at": datetime.now(timezone.utc).isoformat(),
                            "summary_sha256": hashlib.sha256((attempt / "每日汇总.json").read_bytes()).hexdigest()})
