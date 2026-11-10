@@ -277,6 +277,13 @@ export class Flow {
       await this.finalApprove(day,moved.rev);
       return {status:200};
     }
+    const autoDraft=await this.s.get('draft:'+day);
+    if(this.env.AUTO_REVIEW==='true' && !(await this.s.get('auto-review-off')) && autoDraft?.approved_by==='auto') {
+      // The text was auto-approved; images are program-rendered and zh/en numbers were cross-checked before queuing.
+      await this.say(`${this.label(moved)}：4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致，不用你点通过。`);
+      await this.finalApprove(day,moved.rev);
+      return {status:200};
+    }
     await this.say(`${this.label(moved)}：上面4张图和中英文正式稿已备齐，数字与程序订单、中文稿逐项核对一致。\n通过后：台账由程序自动写入；发布安排（北京时间）：${this.planText(moved)}，`
       +(this.env.PUBLISH_ENABLED==='true'?'到点自动发布。':'目前发布总开关关闭，只演练、不发布。'),
       [[{text:'✅ 图片与正式稿通过',callback_data:`final_ok:${day}:${moved.rev}`},
@@ -345,7 +352,9 @@ export class Flow {
     } else lines.push('台账：今天没有新单也没有状态变化，不需要写入。');
     const schedule=await this.schedule(day);
     lines.push(...schedule);
-    await this.say(lines.join('\n'));
+    const byAuto=draft?.approved_by==='auto';
+    if(byAuto) lines.push(this.env.PUBLISH_ENABLED==='true'?'不想发的，到点前点下面的按钮取消。':'目前发布总开关关闭，只演练、不发布。');
+    await this.say(lines.join('\n'),byAuto&&this.env.PUBLISH_ENABLED==='true'?[[{text:'⛔ 取消中文版',callback_data:`cancel_post:${day}:zh`},{text:'⛔ 取消英文版',callback_data:`cancel_post:${day}:en`}]]:undefined);
     return true;
   }
   async finalReject(day,rev) {

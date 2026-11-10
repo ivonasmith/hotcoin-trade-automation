@@ -585,3 +585,34 @@ test('帖子正文不带链接；旧流程里已存的链接发布时也会去�
   assert.equal(stripTradeLog('body\n\nTrade log: https://n.example/x\n'),'body');
   assert.equal(stripTradeLog('正文里提到 https://a.example 的不动'),'正文里提到 https://a.example 的不动');
 });
+
+test('自动评审通过的稿子：出图后不用点终审，自动排发布并带取消按钮；没有自动评审标记的仍要人点',async()=>{
+  const h=harness({env:{AUTO_REVIEW:'true',PUBLISH_ENABLED:'true'}});
+  await seed(h);
+  await h.flow.s.put('draft:'+DAY,{...(await h.flow.s.get('draft:'+DAY)),approved_by:'auto'});
+  await h.flow.startFormal(DAY);
+  const job=await h.flow.nextJob();
+  const names=Object.values((await h.flow.getFlow(DAY)).names);
+  for(const name of names) await h.flow.receiveFile(job.id,name,png());
+  await h.flow.completeJob(job.id,{ok:true,result:{}});
+  const flow=await h.flow.getFlow(DAY);
+  assert.equal(flow.status,'final_approved');
+  assert.deepEqual(flow.slots.zh.status,'scheduled');
+  const cancel=h.log.telegram.filter(m=>m.method==='sendMessage').flatMap(rows);
+  assert.ok(cancel.includes(`cancel_post:${DAY}:zh`) && cancel.includes(`cancel_post:${DAY}:en`));
+  assert.ok(!cancel.some(x=>x.startsWith('final_ok')));
+
+  const manual=harness({env:{AUTO_REVIEW:'true'}});
+  await toAwaitingFinal(manual);
+  assert.equal((await manual.flow.getFlow(DAY)).status,'awaiting_final');
+
+  const off=harness({env:{AUTO_REVIEW:'true'}});
+  await seed(off);
+  await off.flow.s.put('draft:'+DAY,{...(await off.flow.s.get('draft:'+DAY)),approved_by:'auto'});
+  await off.flow.s.put('auto-review-off',1);
+  await off.flow.startFormal(DAY);
+  const job2=await off.flow.nextJob();
+  for(const name of Object.values((await off.flow.getFlow(DAY)).names)) await off.flow.receiveFile(job2.id,name,png());
+  await off.flow.completeJob(job2.id,{ok:true,result:{}});
+  assert.equal((await off.flow.getFlow(DAY)).status,'awaiting_final');
+});

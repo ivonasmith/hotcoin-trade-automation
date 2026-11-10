@@ -2,6 +2,8 @@ import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
 import {boardText} from './board.mjs';
 import {grokHotspots} from './grok.mjs';
+import {REVIEW_SYSTEM,reviewPrompt,ruleGate,parseReview} from './autoreview.mjs';
+import {splitDraft} from './formal.mjs';
 import {buildOrderPlan,orderBlock} from './order.mjs';
 import {DRAFT_SYSTEM,collectTickers,normalizeTickers,lintDraft} from './draft-style.mjs';
 import {Flow,tgErrorReason} from './flow.mjs';
@@ -845,6 +847,14 @@ export class TradeDesk {
     }
     if(text==='/draft') return this.makeDraft(chat,env);
     if(text==='/auto') return this.autoStart(chat,env);
+    if(/^\/autoreview(\s|$)/.test(text||'')) {
+      const arg=(text.split(/\s+/)[1]||'').toLowerCase();
+      if(arg==='off') await this.ctx.storage.put('auto-review-off',Date.now());
+      else if(arg==='on') await this.ctx.storage.delete('auto-review-off');
+      const on=await this.autoReviewOn(env);
+      await reply(`自动评审与自动发布：${on?'开':'关'}。${on?'自动出的稿由程序检查加独立评审员把关，通过后自动出图、到点发布；没通过的会停下来等你点按钮。':'所有稿件都要你点按钮。'}\n/autoreview on 开启，/autoreview off 关闭。`);
+      return json({ok:true});
+    }
     let response;
     await this.ctx.storage.transaction(async tx=>{
       if(await tx.get('tg-update:'+update.update_id)) return;
@@ -873,6 +883,46 @@ export class TradeDesk {
     if(response) await reply(response);
     if(text==='/done' && response==='今日热点已保存，正在生成送审稿。') await this.makeDraft(chat,env);
     return json({ok:true});
+  }
+  async autoReviewOn(env) {
+    return env.AUTO_REVIEW==='true' && !(await this.ctx.storage.get('auto-review-off'));
+  }
+  // Independent reviewer pass. Fails closed: no reviewer, unreadable answer or any doubt means "not approved".
+  async llmReview(env,input,draft,which) {
+    const {body}=splitDraft(draft.content);
+    const wanted=['anthropic','apinebula','gemini','bedrock','custom'].includes(env.REVIEW_PROVIDER)?env.REVIEW_PROVIDER:which;
+    const text=`${input}\n\n——\n待评审的帖子正文：\n${body}`;
+    for(const name of [wanted,...fallbackChain(env,wanted)]) {
+      try {
+        const result=await generateDraft(env,text,name,REVIEW_SYSTEM,reviewPrompt,{attempts:1});
+        return {...parseReview(result.content),model:result.model};
+      } catch { /* try the next channel */ }
+    }
+    return {pass:false,issues:['评审员服务不可用，没法自动评审'],model:null};
+  }
+  // Up to two rounds: review, and if it fails rewrite once with the reviewer's complaints. Returns the final draft record.
+  async autoReview(env,{draft,input,which,plan,snapshot,hotspots}) {
+    let current=draft,issues=[],model=null;
+    for(let round=0;round<2;round++) {
+      const problems=ruleGate(current);
+      const llm=problems.length?{pass:false,issues:[]}:await this.llmReview(env,input,current,which);
+      model=llm.model||model;
+      issues=[...problems,...llm.issues];
+      if(!issues.length) return {ok:true,draft:current,rounds:round,model};
+      if(round===1) break;
+      const feedback=`${input}\n\n——\n自动评审没有通过，请按下面的问题重写整篇稿件（仍严格遵守全部规则，程序订单的数字一字不改）：\n- ${issues.join('\n- ')}\n\n上一稿：\n${current.content}`;
+      let generated=null;
+      for(const name of [which,...fallbackChain(env,which)]) {
+        try { generated=await generateDraft(env,feedback,name,DRAFT_SYSTEM,draftPrompt,{attempts:1}); break; } catch { /* next */ }
+      }
+      if(!generated) { issues.push('自动重写时模型没有响应'); break; }
+      const content=normalizeTickers(generated.content,collectTickers(snapshot,hotspots));
+      const lint=lintDraft(content,plan,hotspots);
+      if(generated.truncated) lint.push('稿件在中途被截断');
+      if(!content.includes('送审备注：')) lint.push('稿件缺少送审备注');
+      current={...current,...generated,content,lint,truncated:generated.truncated};
+    }
+    return {ok:false,draft:current,issues,model};
   }
   // No hotspots pasted: runDraft fetches them (Grok via xAI when configured) and adds the program's movers board.
   async autoStart(chat,env) {
@@ -963,9 +1013,24 @@ export class TradeDesk {
       const lint=lintDraft(content,plan,hotspots);
       if(generated.truncated) lint.push('稿件在中途被截断，送审备注可能不完整，请退回重写');
       if(!content.includes('送审备注：')) lint.push('稿件缺少送审备注');
-      const draft={...generated,content,lint,order:plan.order,order_allowed:plan.allowed,status:'pending_text_review',created:Date.now(),day};
+      let draft={...generated,content,lint,order:plan.order,order_allowed:plan.allowed,status:'pending_text_review',created:Date.now(),day};
       await this.ctx.storage.put('draft:'+day,draft);
-      const warning=(lint.length?`\n\n⚠ 格式自检：${lint.join('；')}。可点“退回重写”。`:'')+switched;
+      let autoNote='';
+      if(saved.auto && await this.autoReviewOn(env)) {
+        const review=await this.autoReview(env,{draft,input,which:generated.provider||which,plan,snapshot,hotspots});
+        draft=review.draft;
+        if(review.ok) {
+          draft={...draft,status:'text_approved',approved:Date.now(),approved_by:'auto',auto_review:{rounds:review.rounds,model:review.model}};
+          await this.ctx.storage.put('draft:'+day,draft);
+          await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}\n\n——\n✅ 自动评审通过（程序检查＋独立评审员${review.rounds?'，自动重写1次后':''}），已进入出图；到点自动发布，你可以在发布前取消。模型：${draft.model}｜用时${Math.round((Date.now()-startedAt)/1000)}秒`});
+          await this.flow(env).startFormal(day);
+          return json({ok:true});
+        }
+        draft={...draft,auto_review:{failed:true,issues:review.issues}};
+        await this.ctx.storage.put('draft:'+day,draft);
+        autoNote=`\n\n🛑 自动评审没有通过（已自动重写1次），没有发布任何东西，请你决定：\n- ${review.issues.join('\n- ')}`;
+      }
+      const warning=(draft.lint.length?`\n\n⚠ 格式自检：${draft.lint.join('；')}。可点“退回重写”。`:'')+switched+autoNote;
       await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}${warning}\n\n——\n状态：等待文字审核｜模型：${draft.model}｜用时${Math.round((Date.now()-startedAt)/1000)}秒`,
         reply_markup:{inline_keyboard:[[
           {text:'✅ 文字通过',callback_data:`text_ok:${day}`},

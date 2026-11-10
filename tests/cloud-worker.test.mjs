@@ -594,3 +594,54 @@ test('撰稿规则：废话句、战绩播报、结尾提问都会被检查出�
   assert.deepEqual(lintDraft(good),[]);
   assert.match(DRAFT_SYSTEM,/战绩[^。]*正文一个字都不写/);
 });
+
+const OK_DRAFT='审核正文：今天不开新单。$BTC收在20日均线下方，日线收盘站回之前我不碰做多。\n\n送审备注：可发，没有新单。';
+const isReview=body=>body.messages[0].content.includes('待评审的帖子正文');
+
+test('自动评审：程序检查和评审员都通过 → 稿件自动通过并进入出图，不等人点',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup((n)=>Response.json({choices:[{message:{content:n===1?OK_DRAFT:'{"pass":true,"issues":[]}'}}]}),{AUTO_REVIEW:'true'});
+  entries.set('hotspots:'+day,{day,parts:['测试热点'],submitted:Date.now(),auto:true});
+  try {
+    await desk.runDraft(123,desk.env,day);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.status,'text_approved');
+    assert.equal(draft.approved_by,'auto');
+    assert.equal(calls.nebula.length,2); // 一次出稿 + 一次评审
+    assert.equal(isReview(calls.nebula[1]),true);
+    assert.equal(calls.telegram.some(c=>c.reply_markup?.inline_keyboard?.flat().some(b=>b.callback_data.startsWith('text_ok'))),false);
+    assert.equal(calls.telegram.some(c=>String(c.text||'').includes('自动评审通过')),true);
+  } finally {restore();}
+});
+
+test('自动评审：评审员两次都不通过 → 停下来等人点，不自动通过，并写明问题',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup((n)=>Response.json({choices:[{message:{content:n%2===1?OK_DRAFT:'{"pass":false,"issues":["第二段的资金动向素材里没有"]}'}}]}),{AUTO_REVIEW:'true'});
+  entries.set('hotspots:'+day,{day,parts:['测试热点'],submitted:Date.now(),auto:true});
+  try {
+    await desk.runDraft(123,desk.env,day);
+    const draft=entries.get('draft:'+day);
+    assert.equal(draft.status,'pending_text_review');
+    assert.equal(draft.auto_review.failed,true);
+    assert.equal(calls.nebula.length,4); // 出稿、评审、重写、再评审
+    const last=calls.telegram.filter(c=>c.text).at(-1);
+    assert.match(last.text,/自动评审没有通过/);
+    assert.match(last.text,/资金动向素材里没有/);
+    assert.equal(last.reply_markup.inline_keyboard.flat().some(b=>b.callback_data.startsWith('text_ok')),true);
+  } finally {restore();}
+});
+
+test('自动评审：开关关闭或手动贴的热点，仍走人工按钮；/autoreview off 能关',async()=>{
+  const manual=draftSetup(()=>Response.json({choices:[{message:{content:OK_DRAFT}}]}),{AUTO_REVIEW:'true'});
+  try {
+    await manual.desk.runDraft(123,manual.desk.env,manual.day); // 热点没有 auto 标记
+    assert.equal(manual.entries.get('draft:'+manual.day).status,'pending_text_review');
+    assert.equal(manual.calls.nebula.length,1);
+  } finally {manual.restore();}
+  const off=draftSetup(()=>Response.json({choices:[{message:{content:OK_DRAFT}}]}),{AUTO_REVIEW:'true'});
+  off.entries.set('auto-review-off',1);
+  off.entries.set('hotspots:'+off.day,{day:off.day,parts:['x'],submitted:Date.now(),auto:true});
+  try {
+    await off.desk.runDraft(123,off.desk.env,off.day);
+    assert.equal(off.entries.get('draft:'+off.day).status,'pending_text_review');
+    assert.equal(off.calls.nebula.length,1);
+  } finally {off.restore();}
+});
