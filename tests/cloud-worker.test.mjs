@@ -645,3 +645,28 @@ test('自动评审：开关关闭或手动贴的热点，仍走人工按钮；/a
     assert.equal(off.calls.nebula.length,1);
   } finally {off.restore();}
 });
+
+test('自动出稿触发：美国联邦假日、时间窗外都会告诉你原因（每天只说一次）；窗内才出稿',async()=>{
+  const sent=[];
+  const old=globalThis.fetch,oldNow=Date.now;
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).includes('apinebula.ai')) return Response.json({choices:[{message:{content:'审核正文：今天不开新单。\n\n送审备注：可发'}}]});
+    sent.push(JSON.parse(options.body));return Response.json({ok:true});
+  };
+  const {desk,entries}=setup({TELEGRAM_BOT_TOKEN:'t',TELEGRAM_OWNER_ID:'123',AUTO_DRAFT:'true',APINEBULA_API_KEY:'k'});
+  try {
+    await desk.autoTrigger(desk.env,'2026-11-11'); // 退伍军人节
+    await desk.autoTrigger(desk.env,'2026-11-11');
+    assert.equal(sent.length,1);
+    assert.match(sent[0].text,/美国联邦节假日.*不出日常计划/);
+    await desk.autoTrigger(desk.env,'2026-11-14'); // 周末：静默
+    assert.equal(sent.length,1);
+    Date.now=()=>Date.parse('2026-11-10T23:30:00+08:00'); // 北京23点，窗外
+    await desk.autoTrigger(desk.env,'2026-11-10');
+    assert.match(sent.at(-1).text,/23点才到/);
+    assert.equal(entries.has('hotspots:2026-11-10'),false);
+    Date.now=()=>Date.parse('2026-11-12T19:20:00+08:00'); // 窗内
+    await desk.autoTrigger(desk.env,'2026-11-12');
+    assert.equal(entries.get('hotspots:2026-11-12').auto,true);
+  } finally {globalThis.fetch=old;Date.now=oldNow;}
+});

@@ -508,14 +508,8 @@ export class TradeDesk {
         await this.ctx.storage.put('plan:current',plan);
         planRules=plan.rules.length;
       } catch { /* 计划生成失败不影响快照上传；主机沿用旧计划直到过期 */ }
-      // 工作日晚间首次快照到达（北京时间19:00-21:00），且今天没人贴热点：自动取热点出送审稿，等你审核。
-      try {
-        const hour=new Date(Date.now()+8*3600000).getUTCHours();
-        if(env.AUTO_DRAFT==='true' && env.TELEGRAM_OWNER_ID && eligible(day).ok && hour>=19 && hour<21
-          && !await this.ctx.storage.get('hotspots:'+day) && !await this.ctx.storage.get('draft:'+day)) {
-          await this.autoStart(env.TELEGRAM_OWNER_ID,env);
-        }
-      } catch { /* 自动出稿失败不影响快照上传；可手动发 /auto */ }
+      // 快照到达后自动出稿。每一种“没有出稿”的原因都会告诉你一次，不再悄悄不动。
+      await this.autoTrigger(env,day);
       return json({ok:true,day,received_at:Date.now(),plan_rules:planRules});
     }
     if(path==='/pipeline/weekly' && request.method==='POST') {
@@ -883,6 +877,24 @@ export class TradeDesk {
     if(response) await reply(response);
     if(text==='/done' && response==='今日热点已保存，正在生成送审稿。') await this.makeDraft(chat,env);
     return json({ok:true});
+  }
+  async autoTrigger(env,day) {
+    if(env.AUTO_DRAFT!=='true' || !env.TELEGRAM_OWNER_ID) return;
+    const once=async text=>{
+      if(await this.ctx.storage.get('auto-note:'+day)) return;
+      await this.ctx.storage.put('auto-note:'+day,Date.now());
+      try { await telegram(env,'sendMessage',{chat_id:env.TELEGRAM_OWNER_ID,text}); } catch { /* 通知失败不影响快照 */ }
+    };
+    try {
+      const gate=eligible(day);
+      if(!gate.ok) { if(gate.reason!=='周末') await once(`今天（${day}）${gate.reason}，按日历不出日常计划，所以没有自动出稿。监控照常运行。`); return; }
+      if(await this.ctx.storage.get('hotspots:'+day) || await this.ctx.storage.get('draft:'+day)) return; // 已有人动过，不重复
+      const hour=new Date(Date.now()+8*3600000).getUTCHours();
+      if(hour<18 || hour>=22) { await once(`今天的快照在北京时间${hour}点才到，不在自动出稿的时间窗（18–22点），没有自动出稿。需要的话发 /auto。`); return; }
+      await this.autoStart(env.TELEGRAM_OWNER_ID,env);
+    } catch(error) {
+      await once(`自动出稿没能启动：${String(error?.message||error).slice(0,200)}。可以发 /auto 手动触发。`);
+    }
   }
   async autoReviewOn(env) {
     return env.AUTO_REVIEW==='true' && !(await this.ctx.storage.get('auto-review-off'));
