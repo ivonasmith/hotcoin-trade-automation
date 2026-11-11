@@ -8,6 +8,7 @@
 // src：ledger（台账在场单，最高优先、不受静默和上限限制）、order（当日新单）、level（关键位）、ma（MA200）、vol（异常波动）。
 import {TRADABLE,fmtPrice,fmtPct} from './order.mjs';
 import {buildCards,PAPER} from './paper.mjs';
+import {eligible} from '../calendar.mjs';
 
 export const PLAN_VERSION=1;
 export const MONITOR_COINS=[...TRADABLE];           // 和程序可出单名单、日更取数覆盖的 21 个币一致
@@ -25,13 +26,13 @@ const clamp=(value,low,high)=>Math.min(high,Math.max(low,value));
 const round2=value=>Math.round(value*100)/100;
 export const ruleKey=(sym,kind,value)=>`${sym}|${kind}|${Number(value).toPrecision(6)}`;
 
-// 计划有效到下一次工作日 19:00 取数之后 1 小时，最长 72 小时；那之后只剩手动 /watch 规则。
+// 计划有效到下一个出稿日 19:00 取数之后 1 小时，最长 72 小时；那之后只剩手动 /watch 规则。
 export function planExpiry(now) {
   const bj=new Date(now+BJ_OFFSET);
   let at=Date.UTC(bj.getUTCFullYear(),bj.getUTCMonth(),bj.getUTCDate(),19,0)-BJ_OFFSET;
   for(let i=0;i<8;i++,at+=24*HOUR) {
-    const weekday=new Date(at+BJ_OFFSET).getUTCDay();
-    if(weekday>=1 && weekday<=5 && at>now+HOUR) return Math.min(at+HOUR,now+MAX_PLAN_MS);
+    // 下一个“出稿日”（日历：周末、中国假日、美国联邦假日都不取数），所以假日里计划不会提前失效
+    if(eligible(new Date(at+BJ_OFFSET).toISOString().slice(0,10)).ok && at>now+HOUR) return Math.min(at+HOUR,now+MAX_PLAN_MS);
   }
   return now+MAX_PLAN_MS;
 }
