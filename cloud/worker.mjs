@@ -880,20 +880,20 @@ export class TradeDesk {
   }
   async autoTrigger(env,day) {
     if(env.AUTO_DRAFT!=='true' || !env.TELEGRAM_OWNER_ID) return;
-    const once=async text=>{
-      if(await this.ctx.storage.get('auto-note:'+day)) return;
-      await this.ctx.storage.put('auto-note:'+day,Date.now());
+    const once=async(text,kind)=>{   // 每种原因每天只说一次，互不占用
+      if(await this.ctx.storage.get(`auto-note:${day}:${kind}`)) return;
+      await this.ctx.storage.put(`auto-note:${day}:${kind}`,Date.now());
       try { await telegram(env,'sendMessage',{chat_id:env.TELEGRAM_OWNER_ID,text}); } catch { /* 通知失败不影响快照 */ }
     };
     try {
       const gate=eligible(day);
-      if(!gate.ok) { if(gate.reason!=='周末') await once(`今天（${day}）${gate.reason}，按日历不出日常计划，所以没有自动出稿。监控照常运行。`); return; }
+      if(!gate.ok) { if(gate.reason!=='周末') await once(`今天（${day}）${gate.reason}，按日历不出日常计划，所以没有自动出稿。监控照常运行。`,'holiday'); return; }
       if(await this.ctx.storage.get('hotspots:'+day) || await this.ctx.storage.get('draft:'+day)) return; // 已有人动过，不重复
       const hour=new Date(Date.now()+8*3600000).getUTCHours();
-      if(hour<18 || hour>=22) { await once(`今天的快照在北京时间${hour}点才到，不在自动出稿的时间窗（18–22点），没有自动出稿。需要的话发 /auto。`); return; }
+      if(hour<18 || hour>=22) { await once(`今天的快照在北京时间${hour}点才到，不在自动出稿的时间窗（18–22点），没有自动出稿。需要的话发 /auto。`,'window'); return; }
       await this.autoStart(env.TELEGRAM_OWNER_ID,env);
     } catch(error) {
-      await once(`自动出稿没能启动：${String(error?.message||error).slice(0,200)}。可以发 /auto 手动触发。`);
+      await once(`自动出稿没能启动：${String(error?.message||error).slice(0,200)}。可以发 /auto 手动触发。`,'error');
     }
   }
   async autoReviewOn(env) {
