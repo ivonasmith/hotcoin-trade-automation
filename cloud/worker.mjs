@@ -992,7 +992,7 @@ export class TradeDesk {
             const coins=Object.keys(snapshot?.summary?.['指标']||{});
             const grok=await grokHotspots(env,day,{coins});
             saved.parts.push(`Grok联网热点（xAI实时检索X与网页，过去24小时；以下是素材，不是已核实事实）：\n${grok.text}`);
-            note=`已自动取到 Grok 热点（${grok.text.length}字，取回${grok.posts}条帖，约$${grok.estimated_usd}）。`;
+            note=`已自动取到 Grok 热点（${grok.text.length}字，${grok.searches}次检索，取回${grok.posts}条帖，${grok.cost_exact?'实收':'估约'}$${grok.estimated_usd}）。`;
           } catch(error) { note=`Grok热点没取到（${error.message}），这次只用程序异动榜。`; }
         } else note='没有配置 xAI 密钥，这次只用程序异动榜。';
         saved.grok_done=true;

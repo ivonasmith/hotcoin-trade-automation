@@ -33,3 +33,16 @@ test('reads output_text when present; errors are readable',async()=>{
   await assert.rejects(grokHotspots({XAI_API_KEY:'k'},'2026-11-10',{fetcher:empty}),/没有返回正文/);
   assert.match(grokPrompt('2026-11-10'),/不要自己预测涨跌/);
 });
+
+test('uses the exact cost xAI reports (ticks) and falls back to the per-post estimate',async()=>{
+  const exact=ok({output:[{type:'message',content:[{type:'output_text',text:'x'}]}],
+    usage:{cost_in_usd_ticks:312500000,server_side_tool_usage_details:{x_posts_fetched:60,x_search_calls:3}}});
+  const a=await grokHotspots({XAI_API_KEY:'k'},'2026-11-12',{fetcher:exact});
+  assert.equal(a.estimated_usd,0.031);
+  assert.equal(a.cost_exact,true);
+  assert.equal(a.searches,3);
+  const none=ok({output:[{type:'message',content:[{type:'output_text',text:'x'}]}],usage:{server_side_tool_usage_details:{x_posts_fetched:60}}});
+  const b=await grokHotspots({XAI_API_KEY:'k'},'2026-11-12',{fetcher:none});
+  assert.equal(b.estimated_usd,0.3);
+  assert.equal(b.cost_exact,false);
+});

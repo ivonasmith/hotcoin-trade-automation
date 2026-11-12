@@ -55,5 +55,10 @@ export async function grokHotspots(env,day,{coins=[],fetcher=fetch,timeoutMs=240
   if(!text) throw Error('xAI 没有返回正文');
   const tools=data?.usage?.server_side_tool_usage_details||{};
   const posts=Number(tools.x_posts_fetched)||0;
-  return {text,model,posts,estimated_usd:Math.round((posts*0.005+(Number(tools.x_users_fetched)||0)*0.01)*1000)/1000,usage:data?.usage||null};
+  // xAI returns the exact charge (tokens + every tool call) as cost_in_usd_ticks, 1 USD = 1e10 ticks; only fall back to the per-post estimate when it is absent.
+  const ticks=Number(data?.usage?.cost_in_usd_ticks);
+  const exact=Number.isFinite(ticks) && ticks>0;
+  const estimated_usd=exact?Math.round(ticks/1e10*1000)/1000
+    :Math.round((posts*0.005+(Number(tools.x_users_fetched)||0)*0.01)*1000)/1000;
+  return {text,model,posts,searches:Number(tools.x_search_calls)||0,cost_exact:exact,estimated_usd,usage:data?.usage||null};
 }
