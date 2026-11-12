@@ -616,3 +616,12 @@ test('自动评审通过的稿子：出图后不用点终审，自动排发布�
   await off.flow.completeJob(job2.id,{ok:true,result:{}});
   assert.equal((await off.flow.getFlow(DAY)).status,'awaiting_final');
 });
+
+test('英文核对：只写月份的“10月到12月”对上 October to December；$BTC24小时 的币种标记不吞数字',async()=>{
+  const {numberDiff,englishProblems}=await import('../cloud/formal.mjs');
+  assert.equal(numberDiff('从10月到12月，价格没动。','From October to December the price did not move.').ok,true);
+  assert.equal(numberDiff('10月31日到期','Expires Oct 31').ok,true);
+  assert.equal(numberDiff('10月31日到期','Expires October').ok,false);
+  assert.deepEqual(englishProblems('$BTC24小时涨了3%，10月到12月不动。','$BTC rose 3% in 24 hours; flat from October to December.'),[]);
+  assert.match(englishProblems('$BTC涨了3%','BTC rose 3%').join(),/缺少币种标记：\$BTC/);
+});

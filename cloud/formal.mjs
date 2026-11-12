@@ -44,7 +44,7 @@ export function bodyProblems(body,draft) {
 export const TRANSLATE_SYSTEM=`You translate an approved Chinese trading post into an English post for X. The Chinese text is the only source.
 Hard rules:
 - Keep every number exactly. Prices keep their thousands separators and decimals (2,585.57). Percentages keep their sign (+4.54%). Ratios stay 1:4. Position sizes keep their value ("0.12仓" -> "0.12 size").
-- Dates: "10月31日" -> "Oct 31". Money: "5.27亿美元" -> "$527 million"; "7.6万" -> "76,000". Averages: "50日均线" -> "50-day moving average".
+- Dates: "10月31日" -> "Oct 31". A month with no day keeps its month: "10月" -> "October", "10月到12月" -> "October to December" (spell the month out; never turn it into a digit or drop it). Money: "5.27亿美元" -> "$527 million"; "7.6万" -> "76,000". Averages: "50日均线" -> "50-day moving average".
 - Keep every $TICKER as written.
 - Keep abbreviations like 80K, 5M exactly as written; never expand "80K" to "80,000" or the reverse. Ranges like "80-81K" stay in the same form.
 - Do not add, remove, round, convert or explain anything. Do not add numbers (no years, no counts, no list numbers).
@@ -64,6 +64,7 @@ export function numberTokens(text,lang) {
   const take=(regex,fn)=>{ rest=rest.replace(regex,(...m)=>{ out.push(fn(m)); return ' '; }); };
   if(lang==='zh') {
     take(/(\d{1,2})月(\d{1,2})日/g,m=>`d:${Number(m[1])}/${Number(m[2])}`);
+    take(/(\d{1,2})月(?!\d{1,2}日)/g,m=>`m:${Number(m[1])}`);   // "10月"（没写日）=> English "October"
     take(/(\d[\d,]*(?:\.\d+)?)\s*亿/g,m=>canon(Number(m[1].replace(/,/g,''))*1e8));
     take(/(\d[\d,]*(?:\.\d+)?)\s*万/g,m=>canon(Number(m[1].replace(/,/g,''))*1e4));
     take(/(\d[\d,]*(?:\.\d+)?)\s*千/g,m=>canon(Number(m[1].replace(/,/g,''))*1e3));
@@ -71,6 +72,8 @@ export function numberTokens(text,lang) {
   } else {
     take(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/gi,
       m=>`d:${MONTHS[m[1].toLowerCase()]}/${Number(m[2])}`);
+    take(/\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)\b\.?(?!\s*\d)/g,
+      m=>`m:${MONTHS[m[1].slice(0,3).toLowerCase()]}`);   // a month with no day number ("October", "Oct")
     take(/(\d[\d,]*(?:\.\d+)?)\s*(billion|million|thousand|bn|mn|[BMK])\b/gi,m=>{
       const unit=m[2].toLowerCase();
       const mult={billion:1e9,bn:1e9,b:1e9,million:1e6,mn:1e6,m:1e6,thousand:1e3,k:1e3}[unit];
@@ -94,7 +97,7 @@ export function englishProblems(zh,en) {
   const diff=numberDiff(zh,en);
   if(diff.missing.length) problems.push(`英文稿缺少这些数字：${diff.missing.join('、')}`);
   if(diff.extra.length) problems.push(`英文稿多出这些数字：${diff.extra.join('、')}`);
-  const tickers=[...String(zh).matchAll(/\$[A-Z][A-Z0-9]{1,9}\b/g)].map(m=>m[0]);
+  const tickers=[...String(zh).matchAll(/\$[A-Z]{2,10}(?![A-Za-z])/g)].map(m=>m[0]);
   const missing=tickers.filter(t=>!en.includes(t));
   if(missing.length) problems.push(`英文稿缺少币种标记：${[...new Set(missing)].join('、')}`);
   return problems;
