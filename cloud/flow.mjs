@@ -7,6 +7,7 @@ import {beijingDay,eligible,dueAt,weeklyDay,weeklyDueAt,WEEKLY_TIME} from '../ca
 import {splitDraft,formalChinese,formalEnglish,stripTradeLog,bodyProblems,TRANSLATE_SYSTEM,translatePrompt,englishProblems,
   issueNumber,posterNames,posterPayload,ledgerPayload,postHeader,limitCashtags} from './formal.mjs';
 import {accessToken,checkPostLength,uploadImage,createPost,xErrorReason} from './x.mjs';
+import {recordPost} from './metrics.mjs';
 
 export function tgErrorReason(error) {
   const status=Number(error?.status)||null;
@@ -538,6 +539,7 @@ export class Flow {
     await this.slotCas(day,lang,['publishing'],{media_ids:mediaIds});
     const tweetId=await createPost({token,text,mediaIds,request:this.d.provider});
     await this.slotCas(day,lang,['publishing'],{tweet_id:tweetId});
+    try { await recordPost(this.s,{day,lang,tweet_id:tweetId,text,issue:flow.issue,now:this.now()}); } catch { /* tracking must never block publishing */ }
     await this.say(`已发布${this.label(flow)}${this.slotName(flow,lang)}：https://x.com/${account.username}/status/${tweetId}`);
   }
   // Channel post: the mobile poster (desktop one when only that exists) with the Chinese/English text as caption (<=1024) or a second message.

@@ -126,3 +126,17 @@ test('/replan：用今天已有的快照重建计划，没有快照就说明；�
     assert.equal(sent.length,count);
   } finally {restore();}
 });
+
+test('/effect answers from stored metrics and the metrics route needs the pipeline secret',async()=>{
+  const {desk,entries,sent,restore}=rig();
+  try {
+    entries.set('posts-index',[{id:'9',day:'2026-11-12',lang:'zh',posted_at:Date.now()-30*3600e3,text:'今天我挂一张单\n正文'}]);
+    entries.set('post-metrics',{'9':[{t:Date.now(),imp:700,like:9,rt:1,reply:0,quote:0,bookmark:2}]});
+    entries.set('x-tokens',null);
+    await hook(desk,7001,'/effect');
+    const text=sent.map(m=>m.text||'').join('\n');
+    assert.match(text,/阅读 700/);
+    const denied=await pipe(desk,'/pipeline/metrics','POST',{}, 'wrong');
+    assert.equal(denied.status,403);
+  } finally { restore(); }
+});

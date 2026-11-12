@@ -2,6 +2,8 @@ import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
 import {boardText} from './board.mjs';
 import {grokHotspots} from './grok.mjs';
+import {collectMetrics,report as metricsReport,styleNote} from './metrics.mjs';
+import {accessToken} from './x.mjs';
 import {REVIEW_SYSTEM,reviewPrompt,ruleGate,parseReview} from './autoreview.mjs';
 import {splitDraft} from './formal.mjs';
 import {buildOrderPlan,orderBlock} from './order.mjs';
@@ -311,6 +313,12 @@ export default {
     return env.DESK.get(env.DESK.idFromName('uncleonchain')).fetch(request);
   },
   async scheduled(event,env,ctx) {
+    if(event.cron==='0 */6 * * *') {   // every 6 hours: refresh read counts of published X posts
+      const stub=env.DESK.get(env.DESK.idFromName('uncleonchain'));
+      ctx.waitUntil(stub.fetch(new Request('https://desk.internal/pipeline/metrics',{method:'POST',
+        headers:{Authorization:'Bearer '+env.PIPELINE_SECRET,'Content-Type':'application/json'},body:'{}'})).catch(()=>null));
+      return;
+    }
     ctx.waitUntil(dispatchCollect(env).catch(()=>({sent:false})));
   }
 };
@@ -350,6 +358,18 @@ export class TradeDesk {
     }
     await this.hostCheck(env);
     await this.flow(env).alarm();
+  }
+  // Pull current read counts for every tracked X post. Failure is reported, never thrown into publishing.
+  async refreshMetrics(env) {
+    try {
+      const token=await accessToken({storage:this.ctx.storage,env,request:provider});
+      const result=await collectMetrics({storage:this.ctx.storage,token,request:provider});
+      return {ok:true,...result};
+    } catch(error) { return {ok:false,error:String(error.message||error).slice(0,200)}; }
+  }
+  async effectReport() {
+    const index=(await this.ctx.storage.get('posts-index'))||[],store=(await this.ctx.storage.get('post-metrics'))||{};
+    return metricsReport({index,store});
   }
   async pipelineAuthorized(request,env) {
     const auth=request.headers.get('Authorization')||'';
@@ -531,6 +551,10 @@ export class TradeDesk {
       if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
       const result=await this.flow(env).startWeekly(day,{pack});
       return json({ok:result.status===200,...result,status:undefined},result.status);
+    }
+    if(path==='/pipeline/metrics' && request.method==='POST') {
+      if(!await this.pipelineAuthorized(request,env)) return json({ok:false},403);
+      return json(await this.refreshMetrics(env));
     }
     if(path==='/pipeline/watchlist' || path==='/pipeline/plan' || path==='/pipeline/notify' || path==='/pipeline/document' || path==='/pipeline/heartbeat')
       return this.hostRoutes(request,url,path,env);
@@ -818,6 +842,11 @@ export class TradeDesk {
       await this.hostStatus(env,reply);
       return json({ok:true});
     }
+    if(text==='/effect') {   // 帖子阅读效果：先刷新一次读数，再给报告
+      const result=await this.refreshMetrics(env);
+      await reply((result.ok?'':`刷新读数失败（${result.error}），下面是已有数据。\n`)+await this.effectReport());
+      return json({ok:true});
+    }
     if(text==='/plan' || text.startsWith('/plan ')) {
       await reply(describePlan(await this.ctx.storage.get('plan:current'),text.split(/\s+/)[1]||''));
       return json({ok:true});
@@ -1005,7 +1034,9 @@ export class TradeDesk {
       if(board && !hotspots.includes('程序异动榜')) hotspots+='\n\n'+board;
       const plan=buildOrderPlan(snapshot,day);
       which=draftProvider(env);
-      const input=hotspots+verified+'\n\n'+orderBlock(plan); // 战绩不再喂给撰稿（2026-10-28：老读者看图，正文不播报）
+      let feedback='';
+      try { feedback=styleNote({index:(await this.ctx.storage.get('posts-index'))||[],store:(await this.ctx.storage.get('post-metrics'))||{}}); } catch { feedback=''; }
+      const input=hotspots+verified+'\n\n'+orderBlock(plan)+(feedback?'\n\n'+feedback:''); // 战绩不再喂给撰稿（2026-10-28：老读者看图，正文不播报）
       const backups=fallbackChain(env,which);
       let generated,primaryError=null;
       const backupsFailed=[];
