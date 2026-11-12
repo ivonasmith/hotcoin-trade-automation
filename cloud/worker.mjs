@@ -2,7 +2,7 @@ import {beijingDay,eligible} from '../calendar.mjs';
 import {compactSnapshot} from './snapshot.mjs';
 import {boardText} from './board.mjs';
 import {grokHotspots} from './grok.mjs';
-import {collectMetrics,report as metricsReport,styleNote} from './metrics.mjs';
+import {collectMetrics,backfillTimeline,report as metricsReport,styleNote} from './metrics.mjs';
 import {accessToken} from './x.mjs';
 import {REVIEW_SYSTEM,reviewPrompt,ruleGate,parseReview} from './autoreview.mjs';
 import {splitDraft} from './formal.mjs';
@@ -365,6 +365,15 @@ export class TradeDesk {
       const token=await accessToken({storage:this.ctx.storage,env,request:provider});
       const result=await collectMetrics({storage:this.ctx.storage,token,request:provider});
       return {ok:true,...result};
+    } catch(error) { return {ok:false,error:String(error.message||error).slice(0,200)}; }
+  }
+  // Register the account's earlier posts too and read them once (idempotent).
+  async backfillPosts(env) {
+    try {
+      const account=await this.ctx.storage.get('x-account');
+      if(!account?.id) return {ok:false,error:'没有 X 账号编号'};
+      const token=await accessToken({storage:this.ctx.storage,env,request:provider});
+      return {ok:true,...await backfillTimeline({storage:this.ctx.storage,token,userId:account.id,request:provider})};
     } catch(error) { return {ok:false,error:String(error.message||error).slice(0,200)}; }
   }
   async effectReport() {
@@ -843,8 +852,9 @@ export class TradeDesk {
       return json({ok:true});
     }
     if(text==='/effect') {   // 帖子阅读效果：先刷新一次读数，再给报告
-      const result=await this.refreshMetrics(env);
-      await reply((result.ok?'':`刷新读数失败（${result.error}），下面是已有数据。\n`)+await this.effectReport());
+      const back=await this.backfillPosts(env);
+      const result=back.ok?{ok:true}:await this.refreshMetrics(env);
+      await reply((back.ok?`已读到账号最近 ${back.seen} 条帖子（新登记 ${back.added} 条）。\n`:result.ok?'':`读取失败（${back.error||result.error}），下面是已有数据。\n`)+await this.effectReport());
       return json({ok:true});
     }
     if(text==='/plan' || text.startsWith('/plan ')) {
@@ -944,13 +954,14 @@ export class TradeDesk {
   // Up to two rounds: review, and if it fails rewrite once with the reviewer's complaints. Returns the final draft record.
   async autoReview(env,{draft,input,which,plan,snapshot,hotspots}) {
     let current=draft,issues=[],model=null;
-    for(let round=0;round<2;round++) {
+    const ROUNDS=3; // first draft + up to two automatic rewrites
+    for(let round=0;round<ROUNDS;round++) {
       const problems=ruleGate(current);
       const llm=problems.length?{pass:false,issues:[]}:await this.llmReview(env,input,current,which);
       model=llm.model||model;
       issues=[...problems,...llm.issues];
       if(!issues.length) return {ok:true,draft:current,rounds:round,model};
-      if(round===1) break;
+      if(round===ROUNDS-1) break;
       const feedback=`${input}\n\n——\n自动评审没有通过，请按下面的问题重写整篇稿件（仍严格遵守全部规则，程序订单的数字一字不改）：\n- ${issues.join('\n- ')}\n\n上一稿：\n${current.content}`;
       let generated=null;
       for(const name of [which,...fallbackChain(env,which)]) {
@@ -963,7 +974,8 @@ export class TradeDesk {
       if(!content.includes('送审备注：')) lint.push('稿件缺少送审备注');
       current={...current,...generated,content,lint,truncated:generated.truncated};
     }
-    return {ok:false,draft:current,issues,model};
+    // hard = what the program itself finds wrong (order numbers, truncation, format, a "hold" verdict). Only those stop publishing.
+    return {ok:false,draft:current,issues,model,hard:ruleGate(current)};
   }
   // No hotspots pasted: runDraft fetches them (Grok via xAI when configured) and adds the program's movers board.
   async autoStart(chat,env) {
@@ -1059,19 +1071,23 @@ export class TradeDesk {
       let draft={...generated,content,lint,order:plan.order,order_allowed:plan.allowed,status:'pending_text_review',created:Date.now(),day};
       await this.ctx.storage.put('draft:'+day,draft);
       let autoNote='';
-      if(saved.auto && await this.autoReviewOn(env)) {
+      if(await this.autoReviewOn(env)) {
         const review=await this.autoReview(env,{draft,input,which:generated.provider||which,plan,snapshot,hotspots});
         draft=review.draft;
-        if(review.ok) {
-          draft={...draft,status:'text_approved',approved:Date.now(),approved_by:'auto',auto_review:{rounds:review.rounds,model:review.model}};
+        // Fully automatic: after the rewrites, a draft the program finds clean still goes out; the reviewer's leftover
+        // objections are shown with the cancel buttons. Draft problems the program itself finds (orders, truncation,
+        // format, a "hold" verdict) still stop everything, because publishing those would be wrong, not just imperfect.
+        const overridden=!review.ok && !(review.hard||[]).length;
+        if(review.ok || overridden) {
+          draft={...draft,status:'text_approved',approved:Date.now(),approved_by:'auto',auto_review:{rounds:review.rounds,model:review.model,...(overridden?{overridden:review.issues}:{})}};
           await this.ctx.storage.put('draft:'+day,draft);
-          await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}\n\n——\n✅ 自动评审通过（程序检查＋独立评审员${review.rounds?'，自动重写1次后':''}），已进入出图；到点自动发布，你可以在发布前取消。模型：${draft.model}｜用时${Math.round((Date.now()-startedAt)/1000)}秒`});
+          await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}\n\n——\n${overridden?`⚠ 评审员仍有疑虑（程序检查全部通过，已自动发布流程继续）：\n- ${review.issues.join('\n- ')}\n`:'✅ 自动评审通过（程序检查＋独立评审员'+(review.rounds?`，自动重写${review.rounds}次后`:'')+'）'}，已进入出图；到点自动发布，你可以在发布前取消。模型：${draft.model}｜用时${Math.round((Date.now()-startedAt)/1000)}秒`});
           await this.flow(env).startFormal(day);
           return json({ok:true});
         }
         draft={...draft,auto_review:{failed:true,issues:review.issues}};
         await this.ctx.storage.put('draft:'+day,draft);
-        autoNote=`\n\n🛑 自动评审没有通过（已自动重写1次），没有发布任何东西，请你决定：\n- ${review.issues.join('\n- ')}`;
+        autoNote=`\n\n🛑 程序检查没有通过（已自动重写2次），为避免发出错的订单/残缺稿，没有发布任何东西：\n- ${review.issues.join('\n- ')}`;
       }
       const warning=(draft.lint.length?`\n\n⚠ 格式自检：${draft.lint.join('；')}。可点“退回重写”。`:'')+switched+autoNote;
       await telegram(env,'sendMessage',{chat_id:chat,text:`${draft.content}${warning}\n\n——\n状态：等待文字审核｜模型：${draft.model}｜用时${Math.round((Date.now()-startedAt)/1000)}秒`,

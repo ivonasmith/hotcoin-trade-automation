@@ -43,6 +43,31 @@ export async function fetchMetrics({token,ids,request}) {
   return merged;
 }
 
+const bjDay=ms=>new Date(ms+8*3600e3).toISOString().slice(0,10);
+// One call over the account's own recent posts: registers any post the registry does not know yet (posts made before tracking
+// started, or by hand) and stores a read count for each. Replies and retweets are left out.
+export async function backfillTimeline({storage,token,userId,request,now=Date.now()}) {
+  const data=await request(`https://api.x.com/2/users/${userId}/tweets?max_results=100&exclude=retweets,replies&tweet.fields=public_metrics,created_at,note_tweet`,
+    {headers:{Authorization:'Bearer '+token}},30000);
+  const index=(await storage.get('posts-index'))||[],store=(await storage.get('post-metrics'))||{};
+  let added=0,snapped=0;
+  for(const t of data?.data||[]) {
+    const text=t.note_tweet?.text||t.text||'';
+    const postedAt=Date.parse(t.created_at)||now;
+    if(!index.some(item=>item.id===t.id)) {
+      index.push({id:String(t.id),day:bjDay(postedAt),lang:/[\u4e00-\u9fff]/.test(text)?'zh':'en',issue:null,posted_at:postedAt,text,backfilled:true});
+      added++;
+    }
+    const m=parseMetrics({data:[t]}).metrics[t.id];
+    const shots=store[t.id]||[];
+    if(m && (!shots.length || now-shots[shots.length-1].t>=30*60e3)) { store[t.id]=[...shots,{t:now,...m}].slice(-12); snapped++; }
+  }
+  index.sort((a,b)=>a.posted_at-b.posted_at);
+  await storage.put('posts-index',index.slice(-400));
+  await storage.put('post-metrics',store);
+  return {seen:(data?.data||[]).length,added,snapped};
+}
+
 // Pull metrics for every tracked post that is still inside the window and append a snapshot when it is due.
 export async function collectMetrics({storage,token,request,now=Date.now()}) {
   const index=((await storage.get('posts-index'))||[]).filter(item=>now-item.posted_at<=KEEP_DAYS*DAY);
