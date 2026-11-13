@@ -387,9 +387,16 @@ def write_csv(name, trades):
 
 
 def main():
+    global OUT, CACHE
+    args = sys.argv[1:]
+    if "--out" in args:
+        i = args.index("--out")
+        OUT = Path(args[i + 1])
+        del args[i:i + 2]
+        CACHE = Path(os.environ.get("HOTCOIN_BT_CACHE", "/tmp/hotcoin_backtest_cache"))
     pull = load_mod(VENDOR / "拉数据.py", "pull")
     paper = __import__("paper")
-    only = sys.argv[1:] or TRADABLE
+    only = args or TRADABLE
     jobs, got = [], {}
     for s in only:
         kl = cached(f"k_{s}.json", lambda s=s: pull_klines(pull, s))
