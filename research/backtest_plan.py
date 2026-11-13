@@ -200,6 +200,19 @@ class Macro:
         i = int((ms - self.px_start) // DAY)
         return self.px[i] if 0 <= i < len(self.px) else None
 
+    def leg_info(self, ms):
+        """当日已知的 BTC 腿：方向、已走天数、从腿起点到今天的收盘涨跌%（按确认日才算已知）。"""
+        j = bisect.bisect_right(self.leg_confirm, to_date(ms)) - 1
+        if j < 0:
+            return None
+        leg = self.legs[j]
+        s0 = int((datetime.strptime(leg["start_date"], "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000
+                  - self.px_start) // DAY)
+        e = int((ms - self.px_start) // DAY)
+        if not (0 <= s0 <= e < len(self.px)):
+            return None
+        return {"dir": leg["dir"], "days": e - s0, "pct": (self.px[e] / self.px[s0] - 1) * 100}
+
     def up_leg_locked(self, ms):
         """BTC 涨腿超过 89 天，且腿内收盘最大回撤 <10% → 不开新多。腿按“确认日”才算已知，不偷看未来。"""
         day = to_date(ms)
@@ -222,7 +235,7 @@ class Macro:
 
 
 # ---------------- 组合回放 ----------------
-def run(data, macro, paper, use_macro):
+def run(data, macro, paper, use_macro, leg_follow=False):
     all_dates = sorted({d["ct"] for sym in data for d in data[sym]["days"]})
     bars_by = {s: data[s]["bars"] for s in data}
     idx_by = {s: {b["ct"]: k for k, b in enumerate(bars_by[s])} for s in data}
@@ -247,6 +260,7 @@ def run(data, macro, paper, use_macro):
             state["baseline_ts"] = ct + 3 * DAY
             continue
         half = 0.5 if rs.get("half") else 1.0
+        lg = macro.leg_info(ct)
         ok1, l1m, _ = macro.l1_mult(ct)
         st = macro.l2(ct)
         gate_long_ok = True
@@ -273,6 +287,8 @@ def run(data, macro, paper, use_macro):
                 if side == "long" and not gate_long_ok:
                     continue
                 if side == "short" and use_macro and not ok1:
+                    continue
+                if leg_follow and lg and ((side == "long" and lg["dir"] == "down") or (side == "short" and lg["dir"] == "up")):
                     continue
                 k = idx_by[s][ct]
                 if k + 1 >= len(bars_by[s]):
@@ -313,6 +329,9 @@ def run(data, macro, paper, use_macro):
                 trade["day"] = to_date(nb["t"])
                 trade["L2"] = STATE_NAME.get(st, "?")
                 trade["L1x"] = l1m
+                trade["legdir"] = lg["dir"] if lg else "?"
+                trade["legdays"] = lg["days"] if lg else -1
+                trade["legpct"] = round(lg["pct"], 1) if lg else 0.0
                 trade["path"] = card.get("path", "")
                 if trade["status"] == "closed":
                     trade["exit_day"] = to_date(trade["exit"]["ts"])
@@ -374,6 +393,32 @@ def report(name, trades, lines):
             rows = [t for t in closed if t["side"] == side and t["L2"] == k]
             if rows:
                 lines.append(f"  {'做多' if side == '多' else '做空'} {k}：{stats(rows)}")
+    lines.append("— 方向 × 开仓时 BTC 腿（涨腿/跌腿）—")
+    for side in ("多", "空"):
+        for d, nm in (("up", "涨腿"), ("down", "跌腿")):
+            rows = [t for t in closed if t["side"] == side and t["legdir"] == d]
+            if rows:
+                lines.append(f"  {'做多' if side == '多' else '做空'} {nm}：{stats(rows)}")
+    lines.append("— 做空 · 涨腿里（回调做空）按“腿已涨了多少%” —")
+    for lo, hi in ((-999, 20), (20, 50), (50, 100), (100, 9999)):
+        rows = [t for t in closed if t["side"] == "空" and t["legdir"] == "up" and lo <= t["legpct"] < hi]
+        if rows:
+            lines.append(f"  涨幅 {lo if lo > -999 else 0}~{hi if hi < 9999 else '以上'}%：{stats(rows)}")
+    lines.append("— 做空 · 跌腿里 按“腿已跌了多少%” —")
+    for lo, hi in ((-5, 10), (10, 20), (20, 30), (30, 999)):
+        rows = [t for t in closed if t["side"] == "空" and t["legdir"] == "down" and lo <= -t["legpct"] < hi]
+        if rows:
+            lines.append(f"  已跌 {max(lo, 0)}~{hi if hi < 999 else '以上'}%：{stats(rows)}")
+    lines.append("— 做空 · 跌腿里 按“腿已走几天” —")
+    for lo, hi in ((0, 4), (4, 9), (9, 22), (22, 999)):
+        rows = [t for t in closed if t["side"] == "空" and t["legdir"] == "down" and lo <= t["legdays"] < hi]
+        if rows:
+            lines.append(f"  第{lo}~{hi if hi < 999 else '以上'}天：{stats(rows)}")
+    lines.append("— 做多 · 涨腿里 按“腿已走几天” —")
+    for lo, hi in ((0, 10), (10, 30), (30, 89), (89, 999)):
+        rows = [t for t in closed if t["side"] == "多" and t["legdir"] == "up" and lo <= t["legdays"] < hi]
+        if rows:
+            lines.append(f"  第{lo}~{hi if hi < 999 else '以上'}天：{stats(rows)}")
     lines.append("— 做空按放行路径 —")
     for path in sorted({t["path"] for t in closed if t["side"] == "空"}):
         lines.append(f"  {path}：{stats([t for t in closed if t['side'] == '空' and t['path'] == path])}")
@@ -403,13 +448,13 @@ def write_csv(name, trades):
     with open(OUT / f"trades_{name}.csv", "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
         w.writerow(["币", "方向", "开仓日", "了结日", "了结方式", "进场", "止损", "目标", "名义美元", "R", "盈亏美元", "最大浮盈R",
-                    "持有天数", "L2状态", "L1倍数", "做空路径"])
+                    "持有天数", "L2状态", "L1倍数", "做空路径", "开仓时腿", "腿天数", "腿涨跌%"])
         for t in trades:
             if t["status"] != "closed":
                 continue
             w.writerow([t["sym"], t["side"], t["day"], t["exit_day"], t["exit"]["reason"], t["entry"], t["stop0"],
                         t["target"], t["notional_usd"], t["r"], t["pnl_usd"], t["mfe_r"], t["days_held"], t["L2"],
-                        t["L1x"], t["path"]])
+                        t["L1x"], t["path"], t["legdir"], t["legdays"], t["legpct"]])
 
 
 def main():
@@ -440,9 +485,11 @@ def main():
     lines = [f"回测区间：{min(v[0] for v in got.values())} ~ {to_date(max(b['ct'] for s in data for b in data[s]['bars']))}",
              "币种及币安永续日线起点：" + "、".join(f"{s}{v[0]}" for s, v in got.items()),
              "说明：每币要先有250天日线才出卡片；L1 周度读数自2013年底起、L2 状态自2010起，都按当日已知读取。"]
-    for use, name in ((True, "full"), (False, "nomacro")):
-        trades = run(data, macro, paper, use)
-        closed = report("完整系统（含 L1/L2/闸门）" if use else "对照：同样的卡片，不用 L1/L2/闸门", trades, lines)
+    for use, lf, name, title in ((True, False, "full", "完整系统（含 L1/L2/闸门）"),
+                                 (True, True, "legfollow", "跟腿版：完整系统 + 涨腿只做多、跌腿只做空"),
+                                 (False, False, "nomacro", "对照：同样的卡片，不用 L1/L2/闸门")):
+        trades = run(data, macro, paper, use, lf)
+        report(title, trades, lines)
         write_csv(name, trades)
     OUT.mkdir(parents=True, exist_ok=True)
     text = "\n".join(lines)

@@ -25,5 +25,11 @@
   "script": "backtest_plan.py",
   "args": [],
   "title": "每日交易计划历史回测 第二版（加方向×L2状态、做空路径、按币、按年拆分）"
+ },
+ {
+  "id": "backtest-plan-20261113c",
+  "script": "backtest_plan.py",
+  "args": [],
+  "title": "回测第三版（加涨腿/跌腿拆分 + 跟腿版）"
  }
 ]
