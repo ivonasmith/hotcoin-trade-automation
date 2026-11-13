@@ -17,6 +17,12 @@ DOWN = {"schema": 4, "asof": "2026-11-11", "btc_leg": {
             "low_close": 73796.06, "low_date": "2026-11-10", "btc_close": 74015.19, "from_peak_pct": -14.6,
             "reversal_line": 81175.67, "to_reversal_pct": 9.7},
     "badge": None, "prev_leg": {"dir": "up", "start_date": "2026-06-30", "end_date": "2026-09-21", "days": 83, "pct": 47.8}}}
+DOWN["alt_leg"] = {"direction": "down", "badge": None,
+                   "leg": {"start_date": "2026-09-27", "start_close": 45.66, "confirm_date": "2026-10-22", "day": 45, "drop_pct": 28.8,
+                           "low_close": 32.51, "low_date": "2026-11-11", "from_peak_pct": -28.8, "reversal_line": 37.38,
+                           "to_reversal_pct": 15.0, "idx_close": 32.51},
+                   "prev_leg": {"dir": "up", "start_date": "2026-08-16", "end_date": "2026-09-27", "days": 42, "pct": 58.8},
+                   "basket": {"coins_today": 57, "threshold_pct": 15.0}}
 # 2026-09-28 的涨腿读数（第 90 天，网站亮「多头只减不加」）
 UP = {"schema": 4, "asof": "2026-09-28", "btc_leg": {
     "direction": "up",
@@ -35,6 +41,13 @@ class FactsTest(unittest.TestCase):
         self.assertIsNone(leg["badge_zh"])
         self.assertNotIn("dd", leg, "跌腿没有腿内回撤，不能拿涨腿的字段冒充")
         self.assertEqual(facts["alt"]["day"], 78)
+
+    def test_altcoin_leg_is_copied_from_the_website_percentages_only(self):
+        al = pf.compute(STATE, DOWN, date(2026, 11, 13))["alt_leg"]
+        self.assertEqual((al["dir"], al["day"], al["start"], al["confirm"], al["coins"]), ("down", 45, "2026-09-27", "2026-10-22", 57))
+        self.assertEqual((al["drop_pct"], al["from_peak_pct"], al["to_reversal_pct"]), (28.8, -28.8, 15.0))
+        self.assertFalse(any(k in al for k in ("start_close", "low_close", "reversal_line", "idx_close")), "指数点位不上海报")
+        self.assertIsNone(pf.compute(STATE, UP, date(2026, 9, 29))["alt_leg"], "网站没有山寨整体时是 None")
 
     def test_up_leg_keeps_peak_drawdown_and_website_badge(self):
         leg = pf.compute(STATE, UP, date(2026, 9, 29))["leg"]

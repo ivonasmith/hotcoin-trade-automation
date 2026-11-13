@@ -41,7 +41,8 @@ def payload():
 class BuildDataTest(unittest.TestCase):
     def test_fields_come_from_ledger_order_and_facts(self):
         data, rows, closed = bd.build(payload())
-        self.assertEqual((data["issue"], data["date"], data["leg_day"], data["leg_past"], data["alt_day"]), ("38", "2026-10-21", 112, 23, 55))
+        self.assertEqual((data["issue"], data["date"], data["leg_day"], data["leg_past"]), ("38", "2026-10-21", 112, 23))
+        self.assertNotIn("alt_day", data, "山寨轮动窗口不再上海报（网站只在详情页显示）")
         self.assertEqual((data["acct_cum"], data["acct_cur"], data["acct_pct"], data["acct_closed"]), ("+$683.72", "$10,683.72", "+6.84%", 17))
         self.assertEqual((data["acct_open"], data["acct_pending"]), (1, 2))
         self.assertEqual(data["badge_today_zh"], "今日新增1单")
@@ -64,6 +65,16 @@ class BuildDataTest(unittest.TestCase):
         self.assertEqual((data["leg_drop_txt"], data["leg_from_peak"], data["leg_reversal"], data["leg_to_reversal"]), ("14.8%", "−14.6%", "81,175.67", "9.7"))
         self.assertEqual((data["leg_low_date"], data["leg_low_close"]), ("11-10", "73,796"))
         self.assertNotIn("leg_badge_zh", data)
+
+    def test_altcoin_leg_fields_and_missing_case(self):
+        p = payload()
+        self.assertIsNone(bd.build(p)[0]["aleg_dir"], "没有山寨整体数据：卡片显示「未生成」")
+        p["facts"]["alt_leg"] = {"dir": "down", "day": 45, "start": "2026-09-27", "confirm": "2026-10-22", "coins": 57,
+                                 "drop_pct": 28.8, "from_peak_pct": -28.8, "to_reversal_pct": 15.0,
+                                 "prev": {"dir": "up", "start_date": "2026-08-16", "end_date": "2026-09-27", "days": 42, "pct": 58.8}}
+        d = bd.build(p)[0]
+        self.assertEqual((d["aleg_dir"], d["aleg_day"], d["aleg_drop"], d["aleg_from_peak"], d["aleg_to_rev"], d["aleg_confirm"]),
+                         ("down", 45, "28.8%", "−28.8%", "+15.0%", "10-22"))
 
     def test_up_leg_badge_only_when_the_website_shows_it(self):
         p = payload()

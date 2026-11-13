@@ -53,6 +53,13 @@ T = {  # 文案表（中/英）
    hint="89天提示线", start="起点", cur="第{n}天",
    st1="腿内最大回撤（{d}）", st1n="历史分位 P25=14.5% / 中位=18.5% / P75=22.9%，目前仍在最浅区间",
    st2="已越过89天提示线", st2v="+{n} 天", st2n="假设级：2019年后越过89天的5条腿，之后2–38天内见顶；全样本不成立，只提示，不做闸门",
+   al_tag="山寨整体", al_up="涨腿第 {n} 天", al_dn="跌腿第 {n} 天", al_bup="上涨腿", al_bdn="下跌腿",
+   al_sub="成交额前 50 左右的山寨币等权指数 · 15% 折线 · 今日 {k} 个币",
+   al_dn_line="高点至最低收盘 <b>−{p}</b>", al_up_line="距起点涨幅 <b>{p}</b>",
+   al_dnK="现在距高点", al_dnC="高点 {s} · {c} 确认", al_revK="反弹确认线", al_revC="指数收盘从最低点反弹 15% ＝ 涨腿重新开始",
+   al_upK="腿内最大回撤", al_upC="回撤到 15% 这一腿结束", al_stK="起点", al_stC="{c} 确认",
+   al_prev="上一腿：{d} {a} → {b}，{n} 天，{p}", al_excl="不含 BTC、ETH、稳定币和代币化股票",
+   al_missing="山寨整体数据未生成", al_missingP="今天没取到足够的山寨币日线，明天自动重试。", al_up_w="涨腿", al_dn_w="跌腿",
    alt_tag="山寨轮动窗口", alt_title="D0+{n} 天", alt_badge="已清零", alt_sub="D0=<b>{d0}</b>（BTC收{c}）· 峰值涨幅最高三个：{top}",
    alt_a="只验证时机，不验证选币", alt_av="不给币名单", alt_an="634币·窗口测过：机械选币没跑赢等权篮子（+9.0% vs +12.9%）",
    alt_b="D0+30清零", alt_bv="已清零", alt_bn="{c}已清零。新窗口要等新的D0：BTC收盘10日涨幅≥15%后首次回落",
@@ -71,6 +78,13 @@ T = {  # 文案表（中/英）
    hint="Day 89 hint", start="Start", cur="Day {n}",
    st1="Max drawdown within leg ({d})", st1n="History: P25=14.5% / median=18.5% / P75=22.9%, still the shallowest range",
    st2="Past the day-89 hint", st2v="+{n} d", st2n="Soft hypothesis: since 2019, all 5 legs past day 89 topped within 2–38 days; fails on full history. Hint only, not a gate",
+   al_tag="Altcoins overall", al_up="Up-leg Day {n}", al_dn="Down-leg Day {n}", al_bup="Up-leg", al_bdn="Down-leg",
+   al_sub="Equal-weight index of ~50 top-volume altcoins · 15% zigzag · {k} coins today",
+   al_dn_line="Peak to lowest close <b>−{p}</b>", al_up_line="Gain from start <b>{p}</b>",
+   al_dnK="From the peak", al_dnC="Peak {s} · confirmed {c}", al_revK="Reversal line", al_revC="A 15% bounce off the low restarts an up-leg",
+   al_upK="Max in-leg drawdown", al_upC="A 15% pullback ends the leg", al_stK="Start", al_stC="confirmed {c}",
+   al_prev="Previous leg: {d} {a} → {b}, {n} days, {p}", al_excl="Excludes BTC, ETH, stablecoins and tokenized stocks",
+   al_missing="Altcoin index not generated", al_missingP="Not enough altcoin candles today; it retries tomorrow.", al_up_w="up", al_dn_w="down",
    alt_tag="Alt Rotation", alt_title="D0+{n} Days", alt_badge="Cleared", alt_sub="D0=<b>{d0}</b> (BTC closed {c}) · Top 3 peak gains: {top}",
    alt_a="Timing only, no picks", alt_av="No coin list", alt_an="634 coin-windows tested: mechanical picks didn't beat the equal-weight basket (+9.0% vs +12.9%)",
    alt_b="D0+30 zero-out", alt_bv="Cleared", alt_bn="Cleared {c}. A new window needs a new D0: first pullback after BTC gains 15%+ over 10 days",
@@ -199,6 +213,43 @@ def leg_html(L, mobile):
     <div class="statbox" style="padding:12px 18px;line-height:1.3"><div class="sl" style="font-size:{z['sl']}px">{t['st2']}</div>
       <div class="sv" style="font-size:{z['sv']}px;margin:3px 0 5px;font-family:var(--sans)">{t['st2v'].format(n=D['leg_past'])}</div><div class="sn" style="font-size:{z['sn']}px">{t['st2n']}</div></div>
   </div></div>"""
+
+def alt_leg_html(L, mobile):
+    """山寨整体涨跌腿（2026-11-13 起和网站一致，替换原来的「山寨轮动窗口」卡；窗口只在网站详情页看）。只用百分比。"""
+    t = T[L]; D = DATA
+    z = dict(pad=("22px 23px 22px" if not mobile else "22px 22px 20px"), tag=(12.5 if not mobile else 13), h2=(22 if not mobile else 24),
+             bd=(12 if not mobile else 13), sub=(12.5 if not mobile else 14), sv=(21 if not mobile else 24), sl=(12 if not mobile else 12.5), sn=(11 if not mobile else 11))
+    head = f'<span class="tag tag-alt" style="font-size:{z["tag"]}px">{t["al_tag"]}</span>'
+    if D.get("aleg_dir") not in ("up", "down"):
+        return f"""
+<div class="card purple" style="padding:{z['pad']};border-radius:4px">
+  <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">{head}</div>
+  <div class="sub" style="font-size:{z['sub']}px;margin-top:12px"><b>{t['al_missing']}</b> {t['al_missingP']}</div></div>"""
+    down = D["aleg_dir"] == "down"
+    badge_bg = "var(--red)" if down else "var(--green)"
+    title = (t["al_dn"] if down else t["al_up"]).format(n=D["aleg_day"])
+    line = t["al_dn_line"].format(p=D["aleg_drop"]) if down else t["al_up_line"].format(p=D["aleg_gain"])
+    if down:
+        box1 = (t["al_dnK"], f'<span style="color:var(--red)">{D["aleg_from_peak"]}</span>', t["al_dnC"].format(s=D["aleg_start"], c=D["aleg_confirm"]))
+        box2 = (t["al_revK"], D["aleg_to_rev"], t["al_revC"])
+    else:
+        box1 = (t["al_upK"], D["aleg_dd"], t["al_upC"])
+        box2 = (t["al_stK"], D["aleg_start"], t["al_stC"].format(c=D["aleg_confirm"]))
+    pv = D.get("aleg_prev")
+    prev = (t["al_prev"].format(d=t["al_up_w"] if pv["dir"] == "up" else t["al_dn_w"], a=pv["start_date"], b=pv["end_date"], n=pv["days"],
+                                p=(f"+{pv['pct']:.1f}%" if pv["pct"] > 0 else f"−{abs(pv['pct']):.1f}%")) + " · ") if pv else ""
+    box = lambda k, v, c: (f'<div class="statbox" style="padding:12px 18px;line-height:1.3"><div class="sl" style="font-size:{z["sl"]}px">{k}</div>'
+                           f'<div class="sv" style="font-size:{z["sv"]}px;margin:3px 0 5px">{v}</div><div class="sn" style="font-size:{z["sn"]}px">{c}</div></div>')
+    return f"""
+<div class="card purple" style="padding:{z['pad']};border-radius:4px">
+  <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">{head}
+    <span class="h2" style="font-size:{z['h2']}px">{title}</span>
+    <span class="badge sq" style="font-size:{z['bd']}px;padding:{3 if mobile else 2}px {12 if mobile else 9}px;background:{badge_bg}">{t['al_bdn'] if down else t['al_bup']}</span></div>
+  <div class="sub" style="font-size:{z['sub']}px;margin-top:10px">{t['al_sub'].format(k=D.get('aleg_coins') or '—')} · {line}</div>
+  <div style="height:16px"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">{box(*box1)}{box(*box2)}</div>
+  <div class="sn" style="font-size:{z['sn']}px;margin-top:12px">{prev}{t['al_excl']}</div></div>"""
+
 
 def alt_html(L, mobile):
     t = T[L]; D = DATA
@@ -359,7 +410,7 @@ def build(L, dev):
         wrap = 30
         body = f"""<div style="padding:22px {wrap}px 44px">
   <div class="kicker" style="font-size:15px">{kicker}</div><h1 class="title" style="font-size:38px;margin-top:6px">{t['title']}</h1>
-  <div style="margin-top:20px">{leg_html(L,True)}</div><div style="margin-top:22px">{alt_html(L,True)}</div>
+  <div style="margin-top:20px">{leg_html(L,True)}</div><div style="margin-top:22px">{alt_leg_html(L,True)}</div>
   {acct_mobile(L)}
   <div style="font-size:26px;font-weight:800;margin-top:34px">{t['hold']}</div>{hold_cards_mobile(L)}
   <div style="font-size:14.5px;color:var(--brown);margin:14px 6px 0">{D['note_zh'] if L=='zh' else D['note_en']}</div>
@@ -368,7 +419,7 @@ def build(L, dev):
         body = f"""<div style="padding:34px 68px 40px">
   <div class="kicker" style="font-size:16.5px">{kicker}</div><h1 class="title" style="font-size:52px;margin-top:12px">{t['title']}</h1>
   <div style="display:grid;grid-template-columns:1.35fr 1fr;gap:20px;margin-top:30px;align-items:start">
-    <div style="display:flex;flex-direction:column;gap:20px">{leg_html(L,False)}{alt_html(L,False)}</div>
+    <div style="display:flex;flex-direction:column;gap:20px">{leg_html(L,False)}{alt_leg_html(L,False)}</div>
     <div style="display:flex;flex-direction:column;gap:20px">{acct_desktop(L)}<div>{closed_desktop(L)}</div></div></div>
   {table_desktop(L)}{today_box(L,False)}{footer_html(L,False)}</div>"""
     return f"""<!doctype html><html lang="{'zh-CN' if L=='zh' else 'en'}"><head><meta charset="utf-8"><style>{CSS}body{{width:{width}px}}</style></head>

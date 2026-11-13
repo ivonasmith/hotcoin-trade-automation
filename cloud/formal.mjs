@@ -142,7 +142,7 @@ export function posterPayload({day,issue,draft,snapshot,body,english}) {
       // Fills the ledger check found but the ledger job has not written yet (it runs after final approval):
       // the poster shows these as held, otherwise it says "未成交" while the price is already through the entry.
       fills:(ledger.proposals||[]).filter(item=>item.type==='fill').map(item=>({issue:String(item.issue),symbol:item.symbol}))},
-    facts:{leg:facts.leg,alt:facts.alt}};
+    facts:{leg:facts.leg,alt:facts.alt,alt_leg:facts.alt_leg??null}};
 }
 
 const addDays=(day,n)=>new Date(Date.parse(day+'T00:00:00Z')+n*86400000).toISOString().slice(0,10);

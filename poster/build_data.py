@@ -10,6 +10,18 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 CJK = re.compile(r"[　-〿一-鿿＀-￯]")
 
 
+def alt_leg_fields(a):
+    """山寨整体涨跌腿（网站 alt_leg）的海报字段：只用百分比。网站没生成时海报显示「山寨整体数据未生成」。"""
+    if not a or a.get("dir") not in ("up", "down"):
+        return dict(aleg_dir=None)
+    base = dict(aleg_dir=a["dir"], aleg_day=a["day"], aleg_start=a["start"], aleg_confirm=a["confirm"][5:],
+                aleg_coins=a.get("coins"), aleg_prev=a.get("prev"))
+    if a["dir"] == "down":
+        return dict(base, aleg_drop=f"{a['drop_pct']:.1f}%", aleg_from_peak=f"{a['from_peak_pct']:+.1f}%".replace("-", "−"),
+                    aleg_to_rev=f"+{a['to_reversal_pct']:.1f}%")
+    return dict(base, aleg_gain=f"+{a['gain_pct']:.1f}%", aleg_dd=f"{a['max_dd_pct']:.1f}%")
+
+
 def leg_fields(leg):
     """BTC 涨腿 / 跌腿的海报字段。数字原样取自网站涨跌腿数据（poster_facts），只做格式化。"""
     base = dict(leg_dir=leg.get("dir", "up"), leg_day=leg["day"], leg_start=leg["start"], leg_start_close=f"{leg['start_close']:,.2f}")
@@ -121,8 +133,8 @@ def build(payload):
     pending = len(rows) - opened
 
     leg, alt = facts.get("leg") or {}, facts.get("alt") or {}
-    if not leg or not alt:
-        raise ValueError("缺少涨腿/山寨窗口数据（poster_facts），不出图")
+    if not leg:
+        raise ValueError("缺少 BTC 涨跌腿数据（poster_facts），不出图")
     cum, equity = ledger.get("cumulative_pnl_usd"), ledger.get("equity_usd")
     if cum is None or equity is None:
         raise ValueError("缺少台账账户数据，不出图")
@@ -132,8 +144,7 @@ def build(payload):
     data = dict(
         issue=issue, date=day,
         **leg_fields(leg),
-        alt_d0=alt["d0"], alt_d0_close=alt["d0_close"], alt_day=alt["day"], alt_cleared=alt["cleared"],
-        alt_top3=alt["top3"], alt_top3_en=alt["top3_en"],
+        **alt_leg_fields(facts.get("alt_leg")),
         acct_closed=int((ledger.get("counts") or {}).get("closed", 0)),
         acct_note=f"更新至第{issue}期·{mmdd}（{new_zh}）", acct_note_en=f"updated to Issue {issue} · {mmdd} ({new_en})",
         acct_cum=money(cum), acct_cur=money(equity, plus=False), acct_pct=f"{cum / 10000 * 100:+.2f}%",
@@ -167,4 +178,12 @@ def verify(htmls, payload):
                     problems.append(f"{lang}/{dev} 缺少订单{key} {fmt_price(order[key])}")
         if f"{payload['issue']}" not in text:
             problems.append(f"{lang}/{dev} 缺少期号")
+        # 涨跌腿数字必须原样出现在图上（数据来自网站，海报只格式化）
+        leg, al = (payload.get("facts") or {}).get("leg") or {}, (payload.get("facts") or {}).get("alt_leg") or {}
+        if leg.get("dir") == "down" and f"{leg['reversal_line']:,.2f}" not in text:
+            problems.append(f"{lang}/{dev} BTC 跌腿缺少反弹确认线 {leg['reversal_line']:,.2f}")
+        if leg.get("day") is not None and str(leg["day"]) not in text:
+            problems.append(f"{lang}/{dev} BTC 涨跌腿缺少天数 {leg['day']}")
+        if al.get("dir") == "down" and f"{al['drop_pct']:.1f}%" not in text:
+            problems.append(f"{lang}/{dev} 山寨整体缺少跌幅 {al['drop_pct']:.1f}%")
     return problems
