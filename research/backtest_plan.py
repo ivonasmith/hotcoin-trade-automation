@@ -368,6 +368,32 @@ def report(name, trades, lines):
         by[t["L2"]].append(t)
     for k, v in by.items():
         lines.append(f"  {k}：{stats(v)}")
+    lines.append("— 方向 × L2 状态 —")
+    for side in ("多", "空"):
+        for k in STATE_NAME.values():
+            rows = [t for t in closed if t["side"] == side and t["L2"] == k]
+            if rows:
+                lines.append(f"  {'做多' if side == '多' else '做空'} {k}：{stats(rows)}")
+    lines.append("— 做空按放行路径 —")
+    for path in sorted({t["path"] for t in closed if t["side"] == "空"}):
+        lines.append(f"  {path}：{stats([t for t in closed if t['side'] == '空' and t['path'] == path])}")
+    lines.append("— 方向 × 年（美元）—")
+    for y in sorted(yy):
+        lg = sum(t["pnl_usd"] for t in closed if t["side"] == "多" and t["exit_day"][:4] == y)
+        sh = sum(t["pnl_usd"] for t in closed if t["side"] == "空" and t["exit_day"][:4] == y)
+        lines.append(f"  {y}：做多 {lg:+,.0f}  做空 {sh:+,.0f}")
+    lines.append("— 按币（合计美元，笔数）—")
+    bc = defaultdict(list)
+    for t in closed:
+        bc[t["sym"]].append(t)
+    lines.append("  " + "；".join(f"{k} {sum(x['pnl_usd'] for x in v):+,.0f}({len(v)})"
+                                  for k, v in sorted(bc.items(), key=lambda kv: -sum(x['pnl_usd'] for x in kv[1]))))
+    lines.append("— 单笔最大亏损/盈利（美元）—")
+    lines.append(f"  亏 {min(t['pnl_usd'] for t in closed):,.0f}  盈 {max(t['pnl_usd'] for t in closed):+,.0f}；"
+                 f"平均持有 {statistics.mean(t['days_held'] for t in closed):.1f} 天；"
+                 f"止损 {sum(1 for t in closed if t['exit']['reason'] == 'stop')} / 止盈 "
+                 f"{sum(1 for t in closed if t['exit']['reason'] == 'target')} / 到期 "
+                 f"{sum(1 for t in closed if t['exit']['reason'] == 'timeout')}")
     lines.append(f"— L1 折扣期开的单 ×0.7：{stats([t for t in closed if t['L1x'] < 1])}；没折扣：{stats([t for t in closed if t['L1x'] >= 1])}")
     return closed
 
