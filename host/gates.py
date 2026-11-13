@@ -1,6 +1,8 @@
 """纸面交易用的宏观闸门和事件窗口核对（《操作规格》v6.5 第 08 节 P0 + v4.1 近价改 ATR 口径）。
 全部由程序按数据算，读不到的才写进“未核对”：
-- 涨腿 89 天线：BTC 当前牛市涨腿超过 89 天且腿内收盘最大回撤 <10% → 只减不加（不开新多）。起点是规则状态（poster_state.json），天数和回撤来自快照里的 poster_facts。
+- 涨腿 89 天线：BTC 当前是涨腿、超过 89 天且腿内收盘最大回撤 <10% → 只减不加（不开新多）。涨腿 / 跌腿、起点、天数、回撤都来自快照里的 poster_facts，
+  poster_facts 直接读网站 uncleonchain.com/data/leg_latest.json（2026-11-13 起和网站同一份数据，不再自己登记起点）。
+  BTC 在跌腿时 89 天线不适用（它只管涨腿），《操作规格》没有给跌腿另设闸门，这里也不加。
 - BTC 日线收盘在 MA20 下方，且过去 7 天跌幅 >5% → 不开新多。
 - 48 小时内两个及以上二元事件（非农 / FOMC / CPI / 监管或立法投票）叠加 → 不开新多。
 - 事件窗口（多空都管，按挂单那一刻算）：事件前 3 天不挂距现价 <1×日线ATR 的单；事件当天和次日不挂任何新单。
@@ -80,12 +82,15 @@ class Gates:
             return None
 
     def leg(self, plan, now_ms):
+        """天数直接用网站的（网站 = 最后一根已收盘 UTC 日线 − 起点）；老快照没有 dir / day 时按旧办法用起点算。"""
         leg = ((plan or {}).get("macro") or {}).get("leg") or {}
         if not leg.get("ok"):
             return None
-        start = datetime.strptime(leg["start"], "%Y-%m-%d").date()
-        today = datetime.fromtimestamp(now_ms / 1000, BJ).date()
-        return {"day": (today - start).days, "dd": leg["dd"], "start": leg["start"]}
+        day = leg.get("day")
+        if day is None:
+            start = datetime.strptime(leg["start"], "%Y-%m-%d").date()
+            day = (datetime.fromtimestamp(now_ms / 1000, BJ).date() - start).days
+        return {"dir": leg.get("dir") or "up", "day": int(day), "dd": leg.get("dd"), "drop": leg.get("drop_pct"), "start": leg["start"]}
 
     def check(self, plan, card, now_ms):
         """返回 {blocks, passes, unchecked}。blocks 里的每一条都会让这单变成影子单。"""
@@ -95,7 +100,10 @@ class Gates:
         if long:
             leg = self.leg(plan, now_ms)
             if leg is None:
-                unchecked.append("涨腿天数/回撤（快照里没有涨腿数据）")
+                unchecked.append("BTC 涨跌腿（快照里没有网站的涨跌腿数据）")
+            elif leg["dir"] == "down":
+                drop = f"，高点 {leg['start']} 起最深 −{leg['drop']:.1f}%" if leg.get("drop") is not None else ""
+                passes.append(f"BTC 当前是跌腿第{leg['day']}天{drop}：89天线只管涨腿，不亮")
             elif leg["day"] > LEG_LIMIT_DAYS and leg["dd"] < LEG_BREAK_PCT:
                 blocks.append(f"宏观闸门·涨腿第{leg['day']}天（>{LEG_LIMIT_DAYS}天线）且腿内最大回撤 {leg['dd']:.1f}%（<{LEG_BREAK_PCT:.0f}%）：只减不加")
             elif leg["day"] > LEG_LIMIT_DAYS:

@@ -10,6 +10,20 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 CJK = re.compile(r"[　-〿一-鿿＀-￯]")
 
 
+def leg_fields(leg):
+    """BTC 涨腿 / 跌腿的海报字段。数字原样取自网站涨跌腿数据（poster_facts），只做格式化。"""
+    base = dict(leg_dir=leg.get("dir", "up"), leg_day=leg["day"], leg_start=leg["start"], leg_start_close=f"{leg['start_close']:,.2f}")
+    if base["leg_dir"] == "down":
+        return dict(base, leg_drop=leg["drop_pct"], leg_drop_txt=f"{leg['drop_pct']:.1f}%",
+                    leg_low_close=f"{leg['low_close']:,.0f}", leg_low_date=leg["low_date"][5:],
+                    leg_from_peak=f"{leg['from_peak_pct']:+.1f}%".replace("-", "−"),
+                    leg_reversal=f"{leg['reversal_line']:,.2f}", leg_to_reversal=f"{leg['to_reversal_pct']:.1f}")
+    return dict(base, leg_peak_pct=f"{leg['peak_pct']:+.1f}%", leg_peak_note=leg["peak_note_zh"], leg_peak_note_en=leg["peak_note_en"],
+                leg_dd=f"{leg['dd']:.2f}%", leg_dd_date=leg["dd_date"], leg_past=max(leg["day"] - 89, 0),
+                leg_badge_zh=leg.get("badge_zh") if "badge_zh" in leg else "多头只减不加",
+                leg_badge_en=leg.get("badge_en") if "badge_en" in leg else "Longs: trim only")
+
+
 def _trim(text):
     return text.rstrip("0").rstrip(".") if "." in text else text
 
@@ -117,9 +131,7 @@ def build(payload):
     new_en = f"1 new {order['symbol']} short order pending" if order else "no new order"
     data = dict(
         issue=issue, date=day,
-        leg_day=leg["day"], leg_start=leg["start"], leg_start_close=f"{leg['start_close']:,.2f}",
-        leg_peak_pct=f"{leg['peak_pct']:+.1f}%", leg_peak_note=leg["peak_note_zh"], leg_peak_note_en=leg["peak_note_en"],
-        leg_dd=f"{leg['dd']:.2f}%", leg_dd_date=leg["dd_date"], leg_past=max(leg["day"] - 89, 0),
+        **leg_fields(leg),
         alt_d0=alt["d0"], alt_d0_close=alt["d0_close"], alt_day=alt["day"], alt_cleared=alt["cleared"],
         alt_top3=alt["top3"], alt_top3_en=alt["top3_en"],
         acct_closed=int((ledger.get("counts") or {}).get("closed", 0)),

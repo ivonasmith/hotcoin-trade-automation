@@ -115,9 +115,11 @@ function shortCard(sym,level,m,macro,screen) {
 export function buildCards(snapshot) {
   const summary=snapshot?.summary||{},metrics=summary['指标']||{},screens=summary['做空筛选']||{};
   const macro=macroView(summary),cards={};
-  const facts=snapshot?.poster_facts;   // 涨腿起点是规则状态，天数/回撤由每日取数按日线收盘算好；主机每天按起点重算天数
-  macro.leg=facts?.ok===true && facts.leg?.start && num(facts.leg.dd)!==null
-    ?{ok:true,start:facts.leg.start,day:facts.leg.day,dd:facts.leg.dd,peak_pct:num(facts.leg.peak_pct)}:{ok:false};
+  const facts=snapshot?.poster_facts;   // BTC 涨腿 / 跌腿直接来自网站 leg_latest.json（每日取数时读），方向、起点、天数和网站一致
+  const lg=facts?.ok===true?facts.leg:null;
+  macro.leg=lg?.start && (lg.dir==='down'?num(lg.drop_pct)!==null:num(lg.dd)!==null)
+    ?{ok:true,dir:lg.dir==='down'?'down':'up',start:lg.start,day:lg.day,asof:lg.asof||null,
+      dd:lg.dir==='down'?null:num(lg.dd),peak_pct:num(lg.peak_pct),drop_pct:num(lg.drop_pct)}:{ok:false};
   for(const sym of TRADABLE) {
     const m=metrics[sym];
     if(!m) continue;

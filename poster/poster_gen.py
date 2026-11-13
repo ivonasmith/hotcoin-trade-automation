@@ -46,7 +46,10 @@ FOOTER_EN = "Orders valid 15 days, void if unfilled | Published direction/entry/
 
 T = {  # 文案表（中/英）
  "zh": dict(kicker="热币分析 · 第 {n} 期 · {d} · {dev}", title="今日方向总表", dev_d="电脑版", dev_m="手机版",
-   leg_tag="涨腿追踪", leg_title="BTC 第 {n} 天", leg_badge="多头只减不加", leg_sub="起点 <b>{s}</b>（收 {c}）· 距起点最高涨 <b>{p}</b>（{note}）",
+   leg_tag="涨跌腿追踪", leg_title="BTC 涨腿第 {n} 天", leg_badge="多头只减不加", leg_sub="起点 <b>{s}</b>（收 {c}）· 距起点最高涨 <b>{p}</b>（{note}）",
+   dn_title="BTC 跌腿第 {n} 天", dn_badge="下跌腿", dn_sub="起点（高点）<b>{s}</b>（收 {c}）· 高点至最低收盘 <b>−{p}</b>（{ld} 最低收盘 {lc}）",
+   dn_meter="刻度：历史牛市回撤分位（%）", dn_st1="现价距高点", dn_st1n="高点 {c} · {s}",
+   dn_st2="反弹确认线", dn_st2n="较现价 +{p}% · 收盘站上＝涨腿重新开始",
    hint="89天提示线", start="起点", cur="第{n}天",
    st1="腿内最大回撤（{d}）", st1n="历史分位 P25=14.5% / 中位=18.5% / P75=22.9%，目前仍在最浅区间",
    st2="已越过89天提示线", st2v="+{n} 天", st2n="假设级：2019年后越过89天的5条腿，之后2–38天内见顶；全样本不成立，只提示，不做闸门",
@@ -61,7 +64,10 @@ T = {  # 文案表（中/英）
    issue="第{i}期", issue_dir="第{i}期·做多",
    h=["标的","进场","现价","浮动盈亏","移动止损","下单时目标"], hold="当前持仓", today="今日"),
  "en": dict(kicker="Hot Coin Desk · Issue {n} · {d} · {dev}", title="Today's Direction Board", dev_d="Desktop", dev_m="Mobile",
-   leg_tag="Leg Tracker", leg_title="BTC Day {n}", leg_badge="Longs: trim only", leg_sub="Start <b>{s}</b> (close {c}) · Peak gain from start <b>{p}</b> ({note})",
+   leg_tag="Leg Tracker", leg_title="BTC Up-leg Day {n}", leg_badge="Longs: trim only", leg_sub="Start <b>{s}</b> (close {c}) · Peak gain from start <b>{p}</b> ({note})",
+   dn_title="BTC Down-leg Day {n}", dn_badge="Down-leg", dn_sub="Start (peak) <b>{s}</b> (close {c}) · Peak to lowest close <b>−{p}</b> ({ld} low close {lc})",
+   dn_meter="Ticks: bull-market drawdown percentiles (%)", dn_st1="Now vs peak", dn_st1n="Peak {c} · {s}",
+   dn_st2="Rebound line", dn_st2n="+{p}% from now · a close above it starts a new up-leg",
    hint="Day 89 hint", start="Start", cur="Day {n}",
    st1="Max drawdown within leg ({d})", st1n="History: P25=14.5% / median=18.5% / P75=22.9%, still the shallowest range",
    st2="Past the day-89 hint", st2v="+{n} d", st2n="Soft hypothesis: since 2019, all 5 legs past day 89 topped within 2–38 days; fails on full history. Hint only, not a gate",
@@ -121,7 +127,48 @@ h1.title{font-weight:500;color:var(--ink)}
 .side-l{color:var(--blue);font-weight:700}.side-s{color:var(--red);font-weight:700}
 """
 
+DD_TICKS = (10, 14.5, 18.5, 22.9, 32.0)   # 历史牛市回撤分位（网站 STATS.dd：P25 / 中位 / P75 / P90，前面的 10 = 10% 才算一轮回撤）
+DD_SCALE = 40.0                           # 刻度条 0–40%，和网站一样
+
+
+def leg_down_html(L, mobile):
+    """BTC 跌腿（2026-11-13 起和网站一致）：同一张卡片结构，内容照网站跌腿模块。"""
+    t = T[L]; D = DATA
+    z = dict(pad=("22px 23px 22px" if not mobile else "22px 22px 20px"), tag=(12.5 if not mobile else 13), h2=(22 if not mobile else 24),
+             bd=(12 if not mobile else 13), sub=(12.5 if not mobile else 14), bar=(11 if not mobile else 12),
+             lt=(12 if not mobile else 13), lb=(11 if not mobile else 11), sv=(21 if not mobile else 24), sl=(12 if not mobile else 12), sn=(11 if not mobile else 11),
+             top=(32 if not mobile else 33))
+    pos = lambda v: min(max(v / DD_SCALE * 100, 0), 100)
+    segs = [(0, 10, "#d9d2c3"), (10, 14.5, "#cfe2ee"), (14.5, 18.5, "#b5d4e6"), (18.5, 22.9, "#9CC6DE"), (22.9, 32.0, "#7fb0d0"), (32.0, DD_SCALE, "#E8A3A7")]
+    bar = "".join(f'<div class="s" style="width:{pos(b)-pos(a):.2f}%;background:{c}"></div>' for a, b, c in segs)
+    ticks = "".join(f'<div class="tick" style="left:{pos(v):.2f}%;top:-3px;height:{z["bar"]+6}px"></div>'
+                    f'<div class="lbl-{"top" if k % 2 == 0 else "bot"}" style="left:{pos(v):.2f}%;{"top:-%dpx" % (z["lt"]+10) if k % 2 == 0 else "top:%dpx;transform:translateX(-50%%)" % (z["bar"]+8)};font-size:{z["lb"]}px;color:var(--muted)">{v:g}</div>'
+                    for k, v in enumerate(DD_TICKS))
+    cur = pos(D["leg_drop"])
+    return f"""
+<div class="card cream" style="padding:{z['pad']};border-radius:4px">
+  <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+    <span class="tag tag-leg" style="font-size:{z['tag']}px">{t['leg_tag']}</span>
+    <span class="h2" style="font-size:{z['h2']}px">{t['dn_title'].format(n=D['leg_day'])}</span>
+    <span class="badge sq" style="font-size:{z['bd']}px;padding:{3 if mobile else 2}px {12 if mobile else 9}px;background:var(--red)">{t['dn_badge']}</span></div>
+  <div class="sub" style="font-size:{z['sub']}px;margin-top:10px">{t['dn_sub'].format(s=D['leg_start'], c=D['leg_start_close'], p=D['leg_drop_txt'], ld=D['leg_low_date'], lc=D['leg_low_close'])}</div>
+  <div style="position:relative;margin-top:{z['top']}px;height:{z['bar']}px">
+    <div class="track" style="height:{z['bar']}px">{bar}</div>{ticks}
+    <div class="dot" style="left:calc({cur:.2f}% - 6px);top:{(z['bar']-12)//2}px;width:12px;height:12px;border-width:2px"></div>
+  </div>
+  <div class="lbl-bot" style="position:static;margin-top:{z['bar']+14}px;font-size:{z['lb']}px;font-family:var(--sans)">{t['dn_meter']}</div>
+  <div style="height:14px"></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+    <div class="statbox" style="padding:12px 18px;line-height:1.3"><div class="sl" style="font-size:{z['sl']}px">{t['dn_st1']}</div>
+      <div class="sv" style="font-size:{z['sv']}px;margin:3px 0 5px;color:var(--red)">{D['leg_from_peak']}</div><div class="sn" style="font-size:{z['sn']}px">{t['dn_st1n'].format(c=D['leg_start_close'], s=D['leg_start'][5:])}</div></div>
+    <div class="statbox" style="padding:12px 18px;line-height:1.3"><div class="sl" style="font-size:{z['sl']}px">{t['dn_st2']}</div>
+      <div class="sv" style="font-size:{z['sv']}px;margin:3px 0 5px">{D['leg_reversal']}</div><div class="sn" style="font-size:{z['sn']}px">{t['dn_st2n'].format(p=D['leg_to_reversal'])}</div></div>
+  </div></div>"""
+
+
 def leg_html(L, mobile):
+    if DATA.get("leg_dir") == "down":
+        return leg_down_html(L, mobile)
     t = T[L]; D = DATA
     cur_pct = min(D["leg_day"] / SCALE_LEG * 100, 100); hint_pct = 89 / SCALE_LEG * 100
     near = abs(cur_pct - hint_pct) < 9   # 标签防重叠：靠近时当前天数放进度条下方（这里始终放下方，更稳）
@@ -135,7 +182,7 @@ def leg_html(L, mobile):
   <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
     <span class="tag tag-leg" style="font-size:{z['tag']}px">{t['leg_tag']}</span>
     <span class="h2" style="font-size:{z['h2']}px">{t['leg_title'].format(n=D['leg_day'])}</span>
-    <span class="badge sq" style="font-size:{z['bd']}px;padding:{3 if mobile else 2}px {12 if mobile else 9}px">{t['leg_badge']}</span></div>
+    {('<span class="badge sq" style="font-size:%spx;padding:%dpx %dpx">%s</span>' % (z['bd'], 3 if mobile else 2, 12 if mobile else 9, (D.get('leg_badge_zh') if L=='zh' else D.get('leg_badge_en')) or t['leg_badge'])) if D.get('leg_badge_zh', t['leg_badge']) else ''}</div>
   <div class="sub" style="font-size:{z['sub']}px;margin-top:10px">{t['leg_sub'].format(s=D['leg_start'],c=D['leg_start_close'],p=D['leg_peak_pct'],note=(D['leg_peak_note'] if L=='zh' else D['leg_peak_note_en']))}</div>
   <div style="position:relative;margin-top:{z['top']}px;height:{z['bar']}px">
     <div class="lbl-top" style="left:{hint_pct:.2f}%;top:-{z['lt']+10}px;font-size:{z['lt']}px">{t['hint']}</div>

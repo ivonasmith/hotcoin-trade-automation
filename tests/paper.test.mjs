@@ -125,7 +125,10 @@ test('慢档不可用的币不出卡',()=>{
 test('涨腿数据和 ATR 随卡片/计划带给主机，主机据此核对闸门',()=>{
   const snapshot={...snap(only('SOL',metric(100))),poster_facts:{ok:true,leg:{day:131,start:'2026-06-30',dd:6.9,peak_pct:47.8}}};
   const {cards,macro}=buildCards(snapshot);
-  assert.deepEqual(macro.leg,{ok:true,start:'2026-06-30',day:131,dd:6.9,peak_pct:47.8});
+  assert.deepEqual(macro.leg,{ok:true,dir:'up',start:'2026-06-30',day:131,asof:null,dd:6.9,peak_pct:47.8,drop_pct:null});
+  // 跌腿（网站 direction=down）：没有腿内回撤，带上跌幅交给主机；主机只标“89天线不亮”
+  const down={...snap(only('SOL',metric(100))),poster_facts:{ok:true,leg:{dir:'down',day:51,start:'2026-09-21',asof:'2026-11-11',drop_pct:14.8}}};
+  assert.deepEqual(buildCards(down).macro.leg,{ok:true,dir:'down',start:'2026-09-21',day:51,asof:'2026-11-11',dd:null,peak_pct:null,drop_pct:14.8});
   assert.equal(cards[cardKey('SOL','down',95)].atr_d_pct,4);
   assert.deepEqual(buildCards(snap(only('SOL',metric(100)))).macro.leg,{ok:false});
   assert.deepEqual(buildCards({...snap(only('SOL',metric(100))),poster_facts:{ok:false,error:'x'}}).macro.leg,{ok:false});

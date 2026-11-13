@@ -81,8 +81,21 @@ class GateTest(unittest.TestCase):
 
     def test_missing_leg_is_unchecked_not_blocked(self):
         out = self.check(make_feed([], btc_bars(CALM)), plan={"built_at": NOW, "macro": {"leg": {"ok": False}}})
-        self.assertTrue(any("涨腿天数" in u for u in out["unchecked"]))
+        self.assertTrue(any("涨跌腿" in u for u in out["unchecked"]))
         self.assertEqual([b for b in out["blocks"] if "涨腿" in b], [])
+
+    def test_down_leg_never_lights_the_89_day_line(self):
+        down = plan_with({"ok": True, "dir": "down", "start": "2026-09-21", "day": 120, "dd": None, "drop_pct": 14.8})
+        out = self.check(make_feed([], btc_bars(CALM)), plan=down)
+        self.assertEqual([b for b in out["blocks"] if "腿" in b], [], "89 天线只管涨腿；跌腿天数再长也不亮")
+        self.assertTrue(any("跌腿第120天" in p and "14.8%" in p for p in out["passes"]), out)
+
+    def test_up_leg_uses_the_website_day_count(self):
+        up = plan_with({"ok": True, "dir": "up", "start": "2026-06-30", "day": 89, "dd": 6.9})
+        out = self.check(make_feed([], btc_bars(CALM)), plan=up)
+        self.assertEqual([b for b in out["blocks"] if "涨腿" in b], [], "网站第 89 天还没过线（> 89 才亮）")
+        up90 = plan_with({"ok": True, "dir": "up", "start": "2026-06-30", "day": 90, "dd": 6.9})
+        self.assertTrue(any("涨腿第90天" in b for b in self.check(make_feed([], btc_bars(CALM)), plan=up90)["blocks"]))
 
     def test_ma20_and_7day_drop_gate(self):
         young = plan_with({"ok": True, "start": "2026-10-01", "day": 40, "dd": 3.0})

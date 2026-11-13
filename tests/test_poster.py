@@ -54,6 +54,24 @@ class BuildDataTest(unittest.TestCase):
         self.assertEqual(btc["size"], "0.12仓")
         self.assertEqual(len(closed), 6)
 
+    def test_down_leg_fields_follow_the_website(self):
+        p = payload()
+        p["facts"]["leg"] = {"dir": "down", "day": 51, "start": "2026-09-21", "start_close": 86620.0, "confirm": "2026-10-30",
+                             "drop_pct": 14.8, "low_close": 73796.06, "low_date": "2026-11-10", "btc_close": 74015.19,
+                             "from_peak_pct": -14.6, "reversal_line": 81175.67, "to_reversal_pct": 9.7, "badge_zh": None, "badge_en": None}
+        data, _, _ = bd.build(p)
+        self.assertEqual((data["leg_dir"], data["leg_day"], data["leg_start"], data["leg_start_close"]), ("down", 51, "2026-09-21", "86,620.00"))
+        self.assertEqual((data["leg_drop_txt"], data["leg_from_peak"], data["leg_reversal"], data["leg_to_reversal"]), ("14.8%", "−14.6%", "81,175.67", "9.7"))
+        self.assertEqual((data["leg_low_date"], data["leg_low_close"]), ("11-10", "73,796"))
+        self.assertNotIn("leg_badge_zh", data)
+
+    def test_up_leg_badge_only_when_the_website_shows_it(self):
+        p = payload()
+        p["facts"]["leg"].update(dir="up", badge_zh=None, badge_en=None)
+        self.assertIsNone(bd.build(p)[0]["leg_badge_zh"])
+        p["facts"]["leg"].update(badge_zh="多头只减不加", badge_en="Longs: trim only")
+        self.assertEqual(bd.build(p)[0]["leg_badge_zh"], "多头只减不加")
+
     def test_held_position_shows_the_moved_stop_not_the_published_one(self):
         p = payload()
         p["ledger"]["active"][1]["stop_now"] = 150.0          # 2R reached: stop moved to entry
