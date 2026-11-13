@@ -630,6 +630,19 @@ test('自动评审：只有评审员有疑虑（程序检查干净）→ 自动�
   } finally {restore();}
 });
 
+test('自动评审：超过时间预算就收手——不再调评审员/重写，程序检查干净的稿子照样放行（不会卡在半路没消息）',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup((n)=>Response.json({choices:[{message:{content:OK_DRAFT}}]}),{AUTO_REVIEW:'true'});
+  entries.set('hotspots:'+day,{day,parts:['测试热点'],submitted:Date.now(),auto:true});
+  try {
+    const draft={status:'pending_text_review',content:OK_DRAFT,lint:[],order_allowed:false};
+    const result=await desk.autoReview(desk.env,{draft,input:'x',which:'apinebula',plan:{},snapshot:null,hotspots:'',deadline:Date.now()-1});
+    assert.equal(result.ok,false);
+    assert.deepEqual(result.hard,[]);
+    assert.match(result.issues.join('|'),/时间预算/);
+    assert.equal(calls.nebula.length,0); // 一次模型都没再调
+  } finally {restore();}
+});
+
 test('自动评审：程序自己查出硬问题（备注结论不是“可发”）→ 重写后仍不行就停下，不发布',async()=>{
   const HOLD='审核正文：今天不开新单。$BTC收在20日均线下方。\n\n送审备注：建议延后，数据缺口';
   const {desk,entries,calls,day,restore}=draftSetup(()=>Response.json({choices:[{message:{content:HOLD}}]}),{AUTO_REVIEW:'true'});

@@ -208,6 +208,10 @@ async function anthropicDraft(env,hotspots,system=DRAFT_SYSTEM,promptFn=draftPro
 }
 const BEDROCK_MODEL='us.anthropic.claude-sonnet-5-5';
 const bedrockUrl=env=>`https://bedrock-runtime.${env.BEDROCK_REGION||'us-east-2'}.amazonaws.com/model/${encodeURIComponent(env.BEDROCK_MODEL||BEDROCK_MODEL)}/converse`;
+// 整个出稿流程跑在 Durable Object 的 alarm 里，系统最长给 15 分钟，超了会被静默掐断（2026-11-13 实际发生：只发了 Grok 那条，之后没有任何消息）。
+// 所以自动评审/重写必须在出稿开始后 REVIEW_DEADLINE_MS 内收手，评审单次调用也限时；留足最后一次在途调用的时间。
+const REVIEW_DEADLINE_MS=9*60000;
+const REVIEW_CALL_MS=70000;
 async function bedrockCall(env,body,timeoutMs) {
   return provider(bedrockUrl(env),{method:'POST',
     headers:{Authorization:`Bearer ${env.BEDROCK_API_KEY}`,'Content-Type':'application/json'},
@@ -939,32 +943,35 @@ export class TradeDesk {
     return env.AUTO_REVIEW==='true' && !(await this.ctx.storage.get('auto-review-off'));
   }
   // Independent reviewer pass. Fails closed: no reviewer, unreadable answer or any doubt means "not approved".
-  async llmReview(env,input,draft,which) {
+  async llmReview(env,input,draft,which,deadline=Infinity) {
     const {body}=splitDraft(draft.content);
     const wanted=['anthropic','apinebula','gemini','bedrock','custom'].includes(env.REVIEW_PROVIDER)?env.REVIEW_PROVIDER:which;
     const text=`${input}\n\n——\n待评审的帖子正文：\n${body}`;
     for(const name of [wanted,...fallbackChain(env,wanted)]) {
+      if(Date.now()>deadline) return {pass:false,issues:['评审超过时间预算，没来得及完成'],model:null};
       try {
-        const result=await generateDraft(env,text,name,REVIEW_SYSTEM,reviewPrompt,{attempts:1});
+        const result=await generateDraft(env,text,name,REVIEW_SYSTEM,reviewPrompt,{attempts:1,timeoutMs:REVIEW_CALL_MS});
         return {...parseReview(result.content),model:result.model};
       } catch { /* try the next channel */ }
     }
     return {pass:false,issues:['评审员服务不可用，没法自动评审'],model:null};
   }
   // Up to two rounds: review, and if it fails rewrite once with the reviewer's complaints. Returns the final draft record.
-  async autoReview(env,{draft,input,which,plan,snapshot,hotspots}) {
+  async autoReview(env,{draft,input,which,plan,snapshot,hotspots,deadline=Infinity}) {
     let current=draft,issues=[],model=null;
     const ROUNDS=3; // first draft + up to two automatic rewrites
     for(let round=0;round<ROUNDS;round++) {
       const problems=ruleGate(current);
-      const llm=problems.length?{pass:false,issues:[]}:await this.llmReview(env,input,current,which);
+      const llm=problems.length?{pass:false,issues:[]}:await this.llmReview(env,input,current,which,deadline);
       model=llm.model||model;
       issues=[...problems,...llm.issues];
       if(!issues.length) return {ok:true,draft:current,rounds:round,model};
       if(round===ROUNDS-1) break;
+      if(Date.now()>deadline) { issues.push('自动重写超过时间预算，按现有稿处理'); break; }
       const feedback=`${input}\n\n——\n自动评审没有通过，请按下面的问题重写整篇稿件（仍严格遵守全部规则，程序订单的数字一字不改）：\n- ${issues.join('\n- ')}\n\n上一稿：\n${current.content}`;
       let generated=null;
       for(const name of [which,...fallbackChain(env,which)]) {
+        if(Date.now()>deadline) break;
         try { generated=await generateDraft(env,feedback,name,DRAFT_SYSTEM,draftPrompt,{attempts:1}); break; } catch { /* next */ }
       }
       if(!generated) { issues.push('自动重写时模型没有响应'); break; }
@@ -1072,7 +1079,7 @@ export class TradeDesk {
       await this.ctx.storage.put('draft:'+day,draft);
       let autoNote='';
       if(await this.autoReviewOn(env)) {
-        const review=await this.autoReview(env,{draft,input,which:generated.provider||which,plan,snapshot,hotspots});
+        const review=await this.autoReview(env,{draft,input,which:generated.provider||which,plan,snapshot,hotspots,deadline:startedAt+REVIEW_DEADLINE_MS});
         draft=review.draft;
         // Fully automatic: after the rewrites, a draft the program finds clean still goes out; the reviewer's leftover
         // objections are shown with the cancel buttons. Draft problems the program itself finds (orders, truncation,

@@ -44,7 +44,7 @@ export function responseText(data) {
   return parts.join('\n').trim();
 }
 
-export async function grokHotspots(env,day,{coins=[],fetcher=fetch,timeoutMs=240000}={}) {
+export async function grokHotspots(env,day,{coins=[],fetcher=fetch,timeoutMs=150000}={}) {
   if(!env.XAI_API_KEY) throw Error('未配置 xAI 密钥');
   const model=env.XAI_MODEL||GROK_DEFAULT_MODEL;
   const body={model,input:[{role:'user',content:grokPrompt(day)}],
