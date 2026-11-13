@@ -321,6 +321,7 @@ class Host:
         self.status = {"started": datetime.now(BJ).isoformat(), "monitor": None, "jobs": None, "scheduler": None}
         self.stop = threading.Event()
         self.work = threading.Lock()  # 有任务在跑时不更新、不重启
+        self.research_lock = threading.Lock()  # 研究任务单独一把锁：跑着时同样不更新、不重启，但不堵取数和出图
 
     def loop(self, name, interval, fn):
         while not self.stop.is_set():
@@ -359,6 +360,9 @@ class Host:
     def updater(self):
         """每 10 分钟看一次仓库有没有新代码。host/ 里的程序变了就自己退出，systemd 十秒内拉起新版。"""
         if not self.work.acquire(blocking=False):
+            return
+        if self.research_lock.locked():   # 研究任务在跑，这轮不更新（会把它杀掉）
+            self.work.release()
             return
         try:
             if self_update(self.env):
@@ -423,14 +427,19 @@ class Host:
         self.status["monitor"] = "；".join(parts)
 
     def research(self):
-        # 研究任务最长占锁 30 分钟，会把每天 19:00 的取数、出图任务堵在后面；所以北京时间 17:45–22:30 不启动研究任务。
+        # 研究任务（回测等）不占全局锁，取数、出图任务照常跑；它自己降了优先级。
+        # 北京时间 17:45–20:10 不启动：19:00 取数、出稿、出中文图都在这段时间里。20:10 起（中文已发、英文 21:00 前图已备好）才开跑。
         now = datetime.now(BJ)
         minutes = now.hour * 60 + now.minute
-        if 17 * 60 + 45 <= minutes < 22 * 60 + 30:
-            self.status["research"] = "避开晚间发稿时段，稍后再跑"
+        if 17 * 60 + 45 <= minutes < 20 * 60 + 10:
+            self.status["research"] = "避开晚间出稿时段，稍后再跑"
             return
-        with self.work:
+        if not self.research_lock.acquire(blocking=False):
+            return
+        try:
             ran = run_research(self.env)
+        finally:
+            self.research_lock.release()
         self.status["research"] = f"刚跑 {','.join(ran)}" if ran else "ok"
 
     def beat(self):
