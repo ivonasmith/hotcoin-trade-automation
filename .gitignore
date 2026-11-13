@@ -8,3 +8,5 @@ __pycache__/
 runtime/
 .wrangler/
 private/
+research/backtest_cache/
+research/backtest_out/
