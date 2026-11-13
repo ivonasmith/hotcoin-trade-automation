@@ -18,7 +18,7 @@ test('request asks for x_search with a date window and a turn cap',async()=>{
   assert.equal(body.max_turns,3);
   assert.deepEqual(body.tools[0],{type:'x_search',from_date:'2026-11-09',to_date:'2026-11-11'});
   assert.equal(body.tools[1].type,'web_search');
-  assert.match(body.input[0].content,/BTC、SOL/);
+  assert.match(body.input[0].content,/情绪综合得分/);
   assert.equal(result.text,'宏观：…');
   assert.equal(result.posts,60);
   assert.equal(result.estimated_usd,0.32);
@@ -31,7 +31,7 @@ test('reads output_text when present; errors are readable',async()=>{
   await assert.rejects(grokHotspots({XAI_API_KEY:'k'},'2026-11-10',{fetcher:bad}),/401.*bad key/);
   const empty=ok({output:[]});
   await assert.rejects(grokHotspots({XAI_API_KEY:'k'},'2026-11-10',{fetcher:empty}),/没有返回正文/);
-  assert.match(grokPrompt('2026-11-10'),/不要自己预测涨跌/);
+  assert.match(grokPrompt('2026-11-10'),/一致预期观察/);
 });
 
 test('uses the exact cost xAI reports (ticks) and falls back to the per-post estimate',async()=>{
