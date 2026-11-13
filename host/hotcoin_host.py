@@ -37,7 +37,7 @@ RESEARCH_STATE_FILE = Path(os.environ.get("HOTCOIN_RESEARCH_STATE_FILE", str(STA
 AUTO_STATE_FILE = Path(os.environ.get("HOTCOIN_AUTO_STATE_FILE", str(STATE_FILE.parent / "auto_monitor.json")))
 PAPER_FILE = Path(os.environ.get("HOTCOIN_PAPER_FILE", str(STATE_FILE.parent / "paper.json")))
 USER_AGENT = "hotcoin-host/" + VERSION
-RETRY_GAP = timedelta(minutes=10)
+RETRY_GAP = timedelta(minutes=5)
 
 # 定时任务：weekdays 是 Python 的 weekday()（周一=0 … 周日=6）；start 到 end 之间都算该跑（错过会补跑）。
 SCHEDULE = {

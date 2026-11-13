@@ -41,8 +41,8 @@ class ScheduleTest(unittest.TestCase):
         state = {}
         now = bj(2026, 11, 6, 19, 0)
         host.mark("collect", now, False, state)
-        self.assertFalse(host.due("collect", now + timedelta(minutes=5), state))  # 失败后 10 分钟内不重试
-        self.assertTrue(host.due("collect", now + timedelta(minutes=10), state))
+        self.assertFalse(host.due("collect", now + timedelta(minutes=4), state))  # 失败后 5 分钟内不重试
+        self.assertTrue(host.due("collect", now + timedelta(minutes=5), state))
         host.mark("collect", now + timedelta(minutes=10), True, state)
         self.assertFalse(host.due("collect", now + timedelta(minutes=40), state))  # 当天已完成
         self.assertTrue(host.due("collect", bj(2026, 11, 9, 19, 1), state))  # 下个工作日又该跑
