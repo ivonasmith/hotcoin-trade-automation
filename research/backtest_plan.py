@@ -235,7 +235,7 @@ class Macro:
 
 
 # ---------------- 组合回放 ----------------
-def run(data, macro, paper, use_macro, leg_follow=False):
+def run(data, macro, paper, use_macro, leg_follow=False, new_rule=False, long_only=False):
     all_dates = sorted({d["ct"] for sym in data for d in data[sym]["days"]})
     bars_by = {s: data[s]["bars"] for s in data}
     idx_by = {s: {b["ct"]: k for k, b in enumerate(bars_by[s])} for s in data}
@@ -288,6 +288,10 @@ def run(data, macro, paper, use_macro, leg_follow=False):
                     continue
                 if side == "short" and use_macro and not ok1:
                     continue
+                if long_only and side == "short":
+                    continue
+                if new_rule and side == "short" and st == "BULL_PULLBACK" and lg and lg["dir"] == "down":
+                    continue      # 已上线的新闸门：牛市回撤·待确认 且 BTC 跌腿 不开新空
                 if leg_follow and lg and ((side == "long" and lg["dir"] == "down") or (side == "short" and lg["dir"] == "up")):
                     continue
                 k = idx_by[s][ct]
@@ -365,6 +369,14 @@ def report(name, trades, lines):
     openn = [t for t in trades if t["status"] != "closed"]
     lines.append(f"\n===== {name} =====")
     lines.append(f"全部：{stats(closed)}；最大回撤 {maxdd(closed):,.0f} 美元（占账户1万的 {maxdd(closed) / 100:.1f}%）；到最后还没了结 {len(openn)} 笔（未计入）")
+    if closed:
+        span = (datetime.strptime(max(t["exit_day"] for t in closed), "%Y-%m-%d")
+                - datetime.strptime(min(t["day"] for t in closed), "%Y-%m-%d")).days / 365.25
+        tot = sum(t["pnl_usd"] for t in closed)
+        a = sum(t["pnl_usd"] for t in closed if t["exit_day"] < "2024")
+        b = tot - a
+        lines.append(f"年化（占账户1万，不复利，按{span:.1f}年）：{tot / span / 100:+.1f}%/年；收益÷最大回撤 {tot / max(maxdd(closed), 1):.2f}；"
+                     f"前段(了结于2023前) {a:+,.0f} 美元 / 后段(2024起) {b:+,.0f} 美元")
     lines.append(f"做多：{stats([t for t in closed if t['side'] == '多'])}")
     lines.append(f"做空：{stats([t for t in closed if t['side'] == '空'])}")
     ym = defaultdict(float)
@@ -500,10 +512,13 @@ def main():
     lines = [f"回测区间：{min(v[0] for v in got.values())} ~ {to_date(max(b['ct'] for s in data for b in data[s]['bars']))}",
              "币种及币安永续日线起点：" + "、".join(f"{s}{v[0]}" for s, v in got.items()),
              "说明：每币要先有250天日线才出卡片；L1 周度读数自2013年底起、L2 状态自2010起，都按当日已知读取。"]
-    for use, lf, name, title in ((True, False, "full", "完整系统（含 L1/L2/闸门）"),
-                                 (True, True, "legfollow", "跟腿版：完整系统 + 涨腿只做多、跌腿只做空"),
-                                 (False, False, "nomacro", "对照：同样的卡片，不用 L1/L2/闸门")):
-        trades = run(data, macro, paper, use, lf)
+    for use, lf, nr, lo, name, title in (
+            (True, False, False, False, "full", "完整系统（含 L1/L2/闸门，不含新做空闸门）"),
+            (True, False, True, False, "newrule", "现行系统 = 完整系统 + 新做空闸门（牛市回撤·待确认 且 BTC 跌腿 不开新空）"),
+            (True, False, True, True, "longonly", "只做多版：现行系统去掉所有做空"),
+            (True, True, False, False, "legfollow", "跟腿版：完整系统 + 涨腿只做多、跌腿只做空"),
+            (False, False, False, False, "nomacro", "对照：同样的卡片，不用 L1/L2/闸门")):
+        trades = run(data, macro, paper, use, lf, nr, lo)
         report(title, trades, lines)
         write_csv(name, trades)
     OUT.mkdir(parents=True, exist_ok=True)
