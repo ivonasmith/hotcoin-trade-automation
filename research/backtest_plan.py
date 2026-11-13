@@ -489,7 +489,11 @@ def main():
         got[s] = (to_date(int(kl[0][0])), len(kl))
         jobs.append((s, kl, fd))
     print("数据：", "、".join(f"{s}({v[0]}起)" for s, v in got.items()), flush=True)
-    with Pool(min(4, os.cpu_count() or 1)) as pool:
+    try:
+        os.nice(15)      # 让出 CPU，别挤占主机上的取数、出图
+    except (AttributeError, OSError):
+        pass
+    with Pool(min(2, os.cpu_count() or 1)) as pool:
         res = pool.map(coin_days, jobs)
     data = {s: {"bars": bars, "days": days} for s, bars, days in res}
     macro = Macro()

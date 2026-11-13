@@ -423,6 +423,12 @@ class Host:
         self.status["monitor"] = "；".join(parts)
 
     def research(self):
+        # 研究任务最长占锁 30 分钟，会把每天 19:00 的取数、出图任务堵在后面；所以北京时间 17:45–22:30 不启动研究任务。
+        now = datetime.now(BJ)
+        minutes = now.hour * 60 + now.minute
+        if 17 * 60 + 45 <= minutes < 22 * 60 + 30:
+            self.status["research"] = "避开晚间发稿时段，稍后再跑"
+            return
         with self.work:
             ran = run_research(self.env)
         self.status["research"] = f"刚跑 {','.join(ran)}" if ran else "ok"
