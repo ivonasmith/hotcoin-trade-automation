@@ -8,7 +8,7 @@
   "durable_objects": {
     "bindings": [{ "name": "DESK", "class_name": "TradeDesk" }]
   },
-  "triggers": { "crons": ["0 */6 * * *"] },
+  "triggers": { "crons": ["0 */6 * * *", "*/10 * * * *"] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TradeDesk"] }],
   "vars": {
     "EXPECTED_X_USERNAME": "Uncle_Onchain",

@@ -630,6 +630,21 @@ test('自动评审：只有评审员有疑虑（程序检查干净）→ 自动�
   } finally {restore();}
 });
 
+test('出稿看门狗：alarm 里的出稿超过13分钟没收尾 → 通知老板重发 /draft；没超时不打扰',async()=>{
+  const {desk,entries,calls,day,restore}=draftSetup(()=>Response.json({}));
+  try {
+    entries.set('draft-watch',{chat:123,day,at:Date.now()-5*60000});
+    assert.deepEqual(await desk.draftWatch(desk.env),{ok:true,stalled:false});
+    assert.equal(calls.telegram.length,0);
+    entries.set('draft-watch',{chat:123,day,at:Date.now()-14*60000});
+    assert.deepEqual(await desk.draftWatch(desk.env),{ok:true,stalled:true});
+    assert.equal(calls.telegram.length,1);
+    assert.match(calls.telegram[0].text,/重发|再发一次 \/draft/);
+    assert.equal(entries.has('draft-watch'),false);
+    assert.deepEqual(await desk.draftWatch(desk.env),{ok:true,stalled:false});   // 报过一次不再重复
+  } finally {restore();}
+});
+
 test('自动评审：超过时间预算就收手——不再调评审员/重写，程序检查干净的稿子照样放行（不会卡在半路没消息）',async()=>{
   const {desk,entries,calls,day,restore}=draftSetup((n)=>Response.json({choices:[{message:{content:OK_DRAFT}}]}),{AUTO_REVIEW:'true'});
   entries.set('hotspots:'+day,{day,parts:['测试热点'],submitted:Date.now(),auto:true});

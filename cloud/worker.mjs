@@ -323,6 +323,12 @@ export default {
         headers:{Authorization:'Bearer '+env.PIPELINE_SECRET,'Content-Type':'application/json'},body:'{}'})).catch(()=>null));
       return;
     }
+    if(event.cron==='*/10 * * * *') {   // 出稿看门狗
+      const stub=env.DESK.get(env.DESK.idFromName('uncleonchain'));
+      ctx.waitUntil(stub.fetch(new Request('https://desk.internal/pipeline/draftwatch',{method:'POST',
+        headers:{Authorization:'Bearer '+env.PIPELINE_SECRET,'Content-Type':'application/json'},body:'{}'})).catch(()=>null));
+      return;
+    }
     ctx.waitUntil(dispatchCollect(env).catch(()=>({sent:false})));
   }
 };
@@ -358,10 +364,23 @@ export class TradeDesk {
     const job=await this.ctx.storage.get('draft-job');
     if(job) {
       await this.ctx.storage.delete('draft-job'); // taken: a retried alarm must not write the draft twice
+      await this.ctx.storage.put('draft-watch',{chat:job.chat,day:job.day,at:Date.now()}); // 被系统掐断时留给看门狗报信
       try { await this.runDraft(job.chat,env,job.day); } catch { /* runDraft reports its own failures */ }
+      await this.ctx.storage.delete('draft-watch');
     }
     await this.hostCheck(env);
     await this.flow(env).alarm();
+  }
+  // 看门狗：出稿在 alarm 里跑，被系统掐断时既没结果也没消息。每 10 分钟看一次，超过 13 分钟还没收尾就告诉老板。
+  async draftWatch(env) {
+    const watch=await this.ctx.storage.get('draft-watch');
+    if(!watch || Date.now()-watch.at<13*60000) return {ok:true,stalled:false};
+    await this.ctx.storage.delete('draft-watch');
+    try {
+      await telegram(env,'sendMessage',{chat_id:Number(watch.chat||env.TELEGRAM_OWNER_ID),
+        text:`⚠ ${watch.day} 的送审稿流程超过 13 分钟没有收尾（云端被系统中断了）。请再发一次 /draft；已取到的 Grok 热点还在，不会重复花钱。`});
+    } catch { /* telegram 不通就算了 */ }
+    return {ok:true,stalled:true};
   }
   // Pull current read counts for every tracked X post. Failure is reported, never thrown into publishing.
   async refreshMetrics(env) {
@@ -564,6 +583,10 @@ export class TradeDesk {
       if(!env.TELEGRAM_OWNER_ID) return json({ok:false,error:'未配置Telegram审核人'},409);
       const result=await this.flow(env).startWeekly(day,{pack});
       return json({ok:result.status===200,...result,status:undefined},result.status);
+    }
+    if(path==='/pipeline/draftwatch' && request.method==='POST') {
+      if(!await this.pipelineAuthorized(request,env)) return json({ok:false},403);
+      return json(await this.draftWatch(env));
     }
     if(path==='/pipeline/metrics' && request.method==='POST') {
       if(!await this.pipelineAuthorized(request,env)) return json({ok:false},403);
