@@ -419,6 +419,17 @@ def report(name, trades, lines):
         rows = [t for t in closed if t["side"] == "多" and t["legdir"] == "up" and lo <= t["legdays"] < hi]
         if rows:
             lines.append(f"  第{lo}~{hi if hi < 999 else '以上'}天：{stats(rows)}")
+    lines.append("— 方向 × L2 状态 × 腿（笔数≥20才列；右边是前段2019–2023 / 后段2024–2026各自的笔数 平均R 盈亏）—")
+    def half(rows):
+        return f"{len(rows)}笔 {statistics.mean(t['r'] for t in rows):+.2f}R {sum(t['pnl_usd'] for t in rows):+,.0f}" if rows else "无"
+    for side in ("多", "空"):
+        for k in STATE_NAME.values():
+            for d, nm in (("up", "涨腿"), ("down", "跌腿")):
+                rows = [t for t in closed if t["side"] == side and t["L2"] == k and t["legdir"] == d]
+                if len(rows) >= 20:
+                    a = [t for t in rows if t["day"] < "2024"]
+                    b = [t for t in rows if t["day"] >= "2024"]
+                    lines.append(f"  {'做多' if side == '多' else '做空'} {k} {nm}：{stats(rows)}  ｜前段 {half(a)}  ｜后段 {half(b)}")
     lines.append("— 做空按放行路径 —")
     for path in sorted({t["path"] for t in closed if t["side"] == "空"}):
         lines.append(f"  {path}：{stats([t for t in closed if t['side'] == '空' and t['path'] == path])}")

@@ -31,5 +31,11 @@
   "script": "backtest_plan.py",
   "args": [],
   "title": "回测第三版（加涨腿/跌腿拆分 + 跟腿版）"
+ },
+ {
+  "id": "backtest-plan-20261113d",
+  "script": "backtest_plan.py",
+  "args": [],
+  "title": "回测第四版（加 方向×L2状态×涨跌腿 交叉表，分前后两段）"
  }
 ]
