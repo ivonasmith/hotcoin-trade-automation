@@ -133,3 +133,17 @@ test('涨腿数据和 ATR 随卡片/计划带给主机，主机据此核对闸�
   assert.deepEqual(buildCards(snap(only('SOL',metric(100)))).macro.leg,{ok:false});
   assert.deepEqual(buildCards({...snap(only('SOL',metric(100))),poster_facts:{ok:false,error:'x'}}).macro.leg,{ok:false});
 });
+
+test('做空闸门：L2=牛市回撤·待确认 且 BTC 在跌腿 → 不开新空；涨腿或别的 L2 状态不受影响',()=>{
+  const m=metric(100,{'阶段':'MA200下方',ma200:110,dev200:-9});
+  const screens={SOL:{'候选':[{'进场':105,'止损':107.1,'目标':96.6,'方向倍数':0.5,'仓位倍数':1,'15天内碰过':false}],'门①':'过','门③路径':'MA200下方'}};
+  const l1l4=L1L4({'四行':{L2:'L2：牛市回撤·待确认｜第 12 天'}});
+  const down={...snap(only('SOL',m),screens,l1l4),poster_facts:{ok:true,leg:{dir:'down',day:20,start:'2026-10-20',asof:'2026-11-09',drop_pct:12}}};
+  const blocked=buildCards(down).cards[cardKey('SOL','up',105)];
+  assert.equal(blocked.qualified,false);
+  assert.match(blocked.blocks.join(),/牛市回撤·待确认，且BTC在跌腿/);
+  const up={...snap(only('SOL',m),screens,l1l4),poster_facts:{ok:true,leg:{day:40,start:'2026-09-30',dd:3,peak_pct:20}}};
+  assert.equal(buildCards(up).cards[cardKey('SOL','up',105)].qualified,true);
+  const other={...down,summary:{...down.summary,'L1L4':L1L4()}};
+  assert.equal(buildCards(other).cards[cardKey('SOL','up',105)].qualified,true);
+});

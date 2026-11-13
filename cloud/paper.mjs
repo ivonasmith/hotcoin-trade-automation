@@ -22,6 +22,7 @@ export function macroView(summary) {
     l1_mult:num(discount?.['新开仓倍数'])??1,
     l2_state:state,
     l2_top_risk:Boolean(state && state.includes('顶部风险')),   // 多头只减不加
+    l2_pullback:Boolean(state && state.includes('牛市回撤')),   // 牛市回撤·待确认：BTC 跌腿时不开新空
     l2_bear:Boolean(state && state.startsWith('熊市')),         // 新开多单 ×0.5
     l2_known:Boolean(state)
   };
@@ -101,6 +102,8 @@ function shortCard(sym,level,m,macro,screen) {
   } else {
     card.passes.push(`做空筛选过三道门（${screen['门③路径']||'MA200下方不受门③限制'}）`,`日线压力位 ${level.segs}段接触`);
   }
+  // 历史回测（2019-2026，21 个币）：L2=牛市回撤·待确认 且 BTC 在跌腿时开的空单 199 笔、平均 -0.68R、合计 -2540 美元，前后两段都亏（BTC 单币 24 笔 -0.41R 同向），所以不开。
+  if(macro.l2_pullback && macro.leg?.ok && macro.leg.dir==='down') card.blocks.push('L2=牛市回撤·待确认，且BTC在跌腿：做空历史回测大幅亏损（199笔平均-0.68R，前后两段都亏），不开新空');
   if(!macro.discount_complete) card.blocks.push('L1宏观读数不全，按规则不开新单');
   const direction=num(match?.['方向倍数'])??0.5;
   const touched=match?Boolean(match['15天内碰过']):(level.gap??999)<=PAPER.touched_gap_days;
