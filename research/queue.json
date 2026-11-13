@@ -37,5 +37,13 @@
   "script": "backtest_plan.py",
   "args": [],
   "title": "回测第四版（加 方向×L2状态×涨跌腿 交叉表，分前后两段）"
+ },
+ {
+  "id": "backtest-btc-20261113",
+  "script": "backtest_plan.py",
+  "args": [
+   "BTC"
+  ],
+  "title": "比特币单币回测（BTC永续日线2019-09起，完整系统/跟腿版/无宏观对照）"
  }
 ]
